@@ -1,0 +1,33 @@
+{
+  "name": "@maskweaver/context",
+  "version": "0.1.0",
+  "description": "Feature-based context management system",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "maskweaver",
+    "context",
+    "feature-management"
+  ],
+  "author": "Maskweaver Community",
+  "license": "MIT",
+  "peerDependencies": {
+    "@maskweaver/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@maskweaver/shared": "workspace:*",
+    "typescript": "^5.3.0"
+  }
+}

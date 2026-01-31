@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "composite": true,
+    "paths": {
+      "@maskweaver/core": ["./packages/core/src"],
+      "@maskweaver/plugin": ["./packages/plugin/src"],
+      "@maskweaver/i18n": ["./packages/i18n/src"],
+      "@maskweaver/shared": ["./packages/shared/src"],
+      "@maskweaver/memory": ["./packages/memory/src"],
+      "@maskweaver/context": ["./packages/context/src"],
+      "@maskweaver/retrospect": ["./packages/retrospect/src"],
+      "@maskweaver/verify": ["./packages/verify/src"]
+    }
+  },
+  "exclude": ["node_modules", "dist"]
+}

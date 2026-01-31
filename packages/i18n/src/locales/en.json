@@ -1,0 +1,21 @@
+{
+  "plugin.name": "Maskweaver",
+  "plugin.description": "Give your AI coding assistant expert personalities",
+  
+  "mask.applied": "Mask '{{name}}' applied",
+  "mask.notFound": "Mask '{{id}}' not found",
+  "mask.listHint": "Use select_mask with a mask ID to apply a persona",
+  
+  "tool.selectMask.description": "Apply an expert persona (mask) to the AI assistant",
+  "tool.listMasks.description": "List all available expert persona masks",
+  
+  "category.softwareEngineering": "Software Engineering",
+  "category.aiMl": "AI & Machine Learning",
+  "category.architecture": "Software Architecture",
+  
+  "error.loadFailed": "Failed to load mask: {{error}}",
+  "error.catalogNotFound": "Mask catalog not found",
+  
+  "session.masksAvailable": "Masks available",
+  "session.initialized": "Maskweaver initialized"
+}

@@ -1,0 +1,39 @@
+{
+  "name": "maskweaver",
+  "version": "0.1.0",
+  "description": "Give your AI coding assistant expert personalities - 가면술사",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun run build.ts",
+    "build:all": "bun run build.ts",
+    "test": "bun test",
+    "lint": "eslint packages --ext .ts",
+    "validate-masks": "bun run packages/core/src/scripts/validateMasks.ts",
+    "dev": "bun run --filter '@maskweaver/plugin' dev",
+    "setup": "bun run scripts/setup.ts"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "ai",
+    "persona",
+    "mask",
+    "expert"
+  ],
+  "author": "Maskweaver Community",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maskweaver/maskweaver.git"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.3.0",
+    "eslint": "^8.56.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0"
+  }
+}

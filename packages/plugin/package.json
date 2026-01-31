@@ -1,0 +1,32 @@
+{
+  "name": "@maskweaver/plugin",
+  "version": "0.1.0",
+  "description": "Maskweaver plugin for opencode - Expert AI personas",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir dist --target node --external @opencode-ai/plugin",
+    "dev": "bun run --watch ./src/index.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@maskweaver/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "ai",
+    "persona",
+    "mask",
+    "expert"
+  ],
+  "license": "MIT"
+}

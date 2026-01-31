@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.bun/
+.pnpm-store/
+
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Test coverage
+coverage/
+
+# Temporary files
+tmp/
+temp/
+
+# Cache
+.cache/
+.turbo/
+
+# Local data
+.opencode-data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

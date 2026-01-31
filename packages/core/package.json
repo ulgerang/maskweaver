@@ -1,0 +1,20 @@
+{
+  "name": "@maskweaver/core",
+  "version": "0.1.0",
+  "description": "Core library for Maskweaver - AI expert persona system",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir dist --target node",
+    "dev": "bun run --watch ./src/index.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "yaml": "^2.3.0",
+    "zod": "^3.22.0"
+  },
+  "peerDependencies": {
+    "bun": ">=1.0.0"
+  },
+  "license": "MIT"
+}

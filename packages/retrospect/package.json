@@ -1,0 +1,33 @@
+{
+  "name": "@maskweaver/retrospect",
+  "version": "0.1.0",
+  "description": "Retrospective system for analyzing work sessions",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "maskweaver",
+    "retrospect",
+    "reflection"
+  ],
+  "author": "Maskweaver Community",
+  "license": "MIT",
+  "peerDependencies": {
+    "@maskweaver/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@maskweaver/shared": "workspace:*",
+    "typescript": "^5.3.0"
+  }
+}

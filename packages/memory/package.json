@@ -1,0 +1,39 @@
+{
+  "name": "@maskweaver/memory",
+  "version": "0.1.0",
+  "description": "Memory system with embeddings and vector search",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "maskweaver",
+    "memory",
+    "embeddings",
+    "vector-search"
+  ],
+  "author": "Maskweaver Community",
+  "license": "MIT",
+  "peerDependencies": {
+    "@maskweaver/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@maskweaver/shared": "workspace:*",
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^9.0.0"
+  }
+}

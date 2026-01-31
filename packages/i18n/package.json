@@ -1,0 +1,12 @@
+{
+  "name": "@maskweaver/i18n",
+  "version": "0.1.0",
+  "description": "Internationalization for Maskweaver",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir dist --target node",
+    "dev": "bun run --watch ./src/index.ts"
+  },
+  "license": "MIT"
+}

@@ -1,6 +1,88 @@
 # Installation
 
-## Quick Install (10 seconds)
+## For Humans
+
+Paste this into your LLM agent session (Claude Code, AmpCode, Cursor, etc.):
+
+```
+Install and configure maskweaver by following the instructions here:
+https://raw.githubusercontent.com/ulgerang/maskweaver/master/docs/installation.md
+```
+
+Or follow the manual installation below—but **we strongly recommend letting an agent handle it. Humans make mistakes.**
+
+---
+
+## For LLM Agents
+
+If you're an LLM Agent helping set up Maskweaver, Welcome! You'll help your user install the best expert persona system for OpenCode.
+
+Tell the user with a greeting like: "**Maskweaver를 설치할게요! 전설적인 개발자들의 페르소나를 AI에 입힐 수 있어요.**"
+
+Follow these steps:
+
+### Step 1: Install OpenCode (if not installed)
+
+```bash
+if command -v opencode &> /dev/null; then
+    echo "OpenCode $(opencode --version) is installed"
+else
+    echo "OpenCode is not installed. Please install it first."
+    echo "Ref: https://opencode.ai/docs"
+fi
+```
+
+If OpenCode isn't installed, check the [OpenCode Installation Guide](https://opencode.ai/docs).
+
+### Step 2: Add Plugin to OpenCode Config
+
+#### Linux/macOS
+
+```bash
+mkdir -p ~/.config/opencode
+cat > ~/.config/opencode/opencode.json << 'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["maskweaver"]
+}
+EOF
+```
+
+#### Windows (PowerShell)
+
+```powershell
+$configPath = "$env:USERPROFILE\.config\opencode"
+New-Item -ItemType Directory -Force -Path $configPath
+@"
+{
+  "`$schema": "https://opencode.ai/config.json",
+  "plugin": ["maskweaver"]
+}
+"@ | Out-File -Encoding UTF8 "$configPath\opencode.json"
+```
+
+### Step 3: Verify Setup
+
+```bash
+opencode --version  # Should be 1.0.150 or higher
+cat ~/.config/opencode/opencode.json  # Should contain "maskweaver" in plugin array
+```
+
+### Step 4: Say Congratulations!
+
+Tell the user:
+
+> "**Maskweaver 설치 완료!**
+>
+> 이제 OpenCode에서 전문가 페르소나를 사용할 수 있어요:
+> - `리눅스 토발즈 가면을 써줘` - 시스템 프로그래밍 전문가
+> - `@dummy-human` - 일반 개발 작업
+> - `@dummy-flash` - 빠른 파일 검색
+> - `@dummy-premium` - 복잡한 아키텍처 설계"
+
+---
+
+## Quick Install (Manual, 10 seconds)
 
 Just add to your OpenCode config - **no npm install required!**
 

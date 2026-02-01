@@ -47,6 +47,25 @@ better yet, redesign this without the stupid lock."
 
 ## Installation
 
+### For Humans
+
+Copy and paste this prompt to your LLM agent (Claude Code, AmpCode, Cursor, etc.):
+
+```
+Install and configure maskweaver by following the instructions here:
+https://raw.githubusercontent.com/ulgerang/maskweaver/master/docs/installation.md
+```
+
+Or read the [Installation Guide](docs/installation.md) directly—but **we strongly recommend letting an agent handle it. Humans make mistakes.**
+
+### For LLM Agents
+
+Fetch the installation guide and follow it:
+
+```bash
+curl -s https://raw.githubusercontent.com/ulgerang/maskweaver/master/docs/installation.md
+```
+
 ### Quick Install
 
 ```bash

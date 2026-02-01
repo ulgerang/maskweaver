@@ -88,7 +88,7 @@ Just add to your OpenCode config - **no npm install required!**
 
 ```json
 {
-  "plugin": ["@maskweaver/plugin"]
+  "plugin": ["maskweaver"]
 }
 ```
 
@@ -154,7 +154,7 @@ For all projects, edit `~/.config/opencode/opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@maskweaver/plugin"]
+  "plugin": ["maskweaver"]
 }
 ```
 
@@ -165,7 +165,7 @@ For a specific project, create `opencode.json` in your project root:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@maskweaver/plugin"]
+  "plugin": ["maskweaver"]
 }
 ```
 
@@ -180,7 +180,7 @@ For contributors or local development:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@maskweaver/plugin"]
+  "plugin": ["maskweaver"]
 }
 ```
 
@@ -305,7 +305,7 @@ bun link
 
 # In your OpenCode config dir
 cd ~/.config/opencode/plugins
-bun link @maskweaver/plugin
+bun link maskweaver
 ```
 
 ### Using file path
@@ -522,7 +522,7 @@ ls ~/.cache/opencode/node_modules/@maskweaver
 2. Verify the plugin name is correct:
    ```json
    {
-     "plugin": ["@maskweaver/plugin"]
+     "plugin": ["maskweaver"]
    }
    ```
 
@@ -586,7 +586,7 @@ mkdir -p ~/.config/opencode
 cat > ~/.config/opencode/opencode.json << 'EOF'
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@maskweaver/plugin"]
+  "plugin": ["maskweaver"]
 }
 EOF
 ```
@@ -599,7 +599,7 @@ New-Item -ItemType Directory -Force -Path $configPath
 @"
 {
   "`$schema": "https://opencode.ai/config.json",
-  "plugin": ["@maskweaver/plugin"]
+  "plugin": ["maskweaver"]
 }
 "@ | Out-File -Encoding UTF8 "$configPath\opencode.json"
 ```

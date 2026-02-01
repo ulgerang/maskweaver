@@ -30,7 +30,7 @@ import {
   isVerboseLoggingEnabled,
   validateConfig,
   type MaskweaverPluginConfig,
-} from './config';
+} from './config/index.js';
 
 // New tool imports
 import { createMemorySearchTool } from './tools/memorySearch.js';

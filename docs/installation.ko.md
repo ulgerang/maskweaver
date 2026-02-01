@@ -4,6 +4,19 @@ Maskweaver의 완전한 설치 방법입니다.
 
 ---
 
+## 사람용 (가장 쉬운 방법)
+
+아래 내용을 LLM 에이전트 세션(Claude Code, AmpCode, Cursor 등)에 붙여넣기 하세요:
+
+```
+Install and configure maskweaver by following the instructions here:
+https://raw.githubusercontent.com/ulgerang/maskweaver/master/docs/installation.ko.md
+```
+
+또는 아래의 수동 설치를 따라하세요—하지만 **에이전트에게 맡기는 것을 강력 추천합니다. 사람은 실수하니까요.**
+
+---
+
 ## 빠른 설치 (10초)
 
 OpenCode 설정에 추가만 하면 됩니다 - **npm install 불필요!**
@@ -540,7 +553,24 @@ ls -la ./masks
 
 LLM 에이전트가 사용자의 Maskweaver 설치를 도와줄 때 반드시 따라야 할 단계입니다.
 
-### 1단계: OpenCode 설정에 플러그인 추가
+사용자에게 다음과 같이 인사하세요: "**Maskweaver를 설치할게요! 전설적인 개발자들의 페르소나를 AI에 입힐 수 있어요.**"
+
+다음 단계를 따르세요:
+
+### 1단계: OpenCode 설치 확인
+
+```bash
+if command -v opencode &> /dev/null; then
+    echo "OpenCode $(opencode --version) is installed"
+else
+    echo "OpenCode is not installed. Please install it first."
+    echo "Ref: https://opencode.ai/docs"
+fi
+```
+
+OpenCode가 설치되지 않았다면 [OpenCode 설치 가이드](https://opencode.ai/docs)를 참조하세요.
+
+### 2단계: OpenCode 설정에 플러그인 추가
 
 #### Linux/macOS
 
@@ -567,7 +597,7 @@ New-Item -ItemType Directory -Force -Path $configPath
 "@ | Out-File -Encoding UTF8 "$configPath\opencode.json"
 ```
 
-### 2단계: 사용자의 인증된 프로바이더 확인 (필수!)
+### 3단계: 사용자의 인증된 프로바이더 확인 (필수!)
 
 **질문하기 전에, 먼저 다음 명령어로 사용자의 환경을 확인하세요:**
 
@@ -589,7 +619,7 @@ opencode models
 
 이 정보로 사용자가 이미 인증한 서비스를 알 수 있습니다. **이 정보를 바탕으로 적절한 모델을 제안하세요.**
 
-### 3단계: 사용 가능한 모델 분석 및 자동 추천
+### 4단계: 사용 가능한 모델 분석 및 자동 추천
 
 **`opencode models`를 실행하고 결과를 분석하세요.** 작업 유형을 물어보지 말고, 사용 가능한 모델을 기반으로 바로 추천하세요.
 
@@ -627,7 +657,7 @@ opencode models
 2. `*glm-4.7-flash` 또는 `*haiku-4` - 빠른 응답
 3. `*gpt-4o-mini` - 저렴
 
-### 4단계: 사용자에게 자동 추천
+### 5단계: 사용자에게 자동 추천
 
 **`opencode models` 분석 후, 바로 추천합니다:**
 
@@ -655,7 +685,7 @@ opencode models
     3. 빠른 단순 작업
 ```
 
-### 5단계: 예외 상황 처리
+### 6단계: 예외 상황 처리
 
 **프로바이더가 하나만 있을 때:**
 ```
@@ -671,7 +701,7 @@ opencode models
     - 복잡한 작업: anthropic/claude-sonnet-4 (대체)
 ```
 
-### 6단계: 메모리 기능 질문 (선택사항)
+### 7단계: 메모리 기능 질문 (선택사항)
 
 사용자에게 물어보세요:
 
@@ -700,7 +730,7 @@ opencode models
 | OpenRouter | `openai/text-embedding-3-large` | 다양한 모델 |
 | Text | `fts5` | API 키 불필요, 키워드 검색만 |
 
-### 7단계: 설정 파일 생성
+### 8단계: 설정 파일 생성
 
 사용자 답변을 바탕으로 설정 파일을 생성합니다:
 
@@ -742,7 +772,7 @@ EOF
 "@ | Out-File -Encoding UTF8 "$env:USERPROFILE\.config\opencode\maskweaver.config.json"
 ```
 
-### 8단계: 완료 메시지
+### 9단계: 완료 메시지
 
 모든 설정이 완료된 후에만 사용자에게 알려주세요:
 

@@ -337,15 +337,6 @@ MIT - See [LICENSE](LICENSE)
 
 ---
 
-## 🙏 Acknowledgments
-
-Inspired by:
-- **Rob Pike** - Simplicity in design
-- **TJ Holowaychuk** - Beautiful CLIs and tools
-- **Sindre Sorhus** - npm ecosystem excellence
-
----
-
 <p align="center">
   <sub>Crafted with 🎭 by <a href="https://github.com/ulgerang">ULJI SOFT</a></sub>
 </p>

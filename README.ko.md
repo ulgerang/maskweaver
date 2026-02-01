@@ -317,15 +317,6 @@ MIT - [LICENSE](LICENSE) 참조
 
 ---
 
-## 🙏 감사의 말
-
-영감을 받은 출처:
-- **Rob Pike** - 설계의 단순성
-- **TJ Holowaychuk** - 아름다운 CLI와 도구들
-- **Sindre Sorhus** - npm 생태계 우수성
-
----
-
 <p align="center">
   <sub>🎭와 함께 제작 by <a href="https://github.com/ulgerang">ULJI SOFT</a></sub>
 </p>

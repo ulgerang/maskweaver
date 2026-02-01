@@ -156,6 +156,27 @@ export function createSquadTool(): ToolFactory {
   return {
     description: `Multi-agent collaboration management.
 
+**⚠️ DELEGATION PRINCIPLE:**
+Primary agent (가면술사) should delegate tactical operations to Squad Operator.
+Direct use of assign/update/complete by primary agent pollutes strategic context.
+
+**Role-based Action Guide:**
+| Action | Primary Agent | Operator | Notes |
+|--------|---------------|----------|-------|
+| start | ✅ OK | ❌ | Session setup |
+| squad | ✅ OK | ❌ | Squad creation |
+| assign | ⚠️ Delegate | ✅ OK | Task assignment |
+| update | ⚠️ Delegate | ✅ OK | Status updates |
+| complete | ⚠️ Delegate | ✅ OK | Task completion |
+| status | ✅ OK | ✅ OK | Read-only |
+| watchdog | ✅ OK | ✅ OK | Health check |
+| list | ✅ OK | ✅ OK | Read-only |
+
+**Correct Workflow:**
+1. Primary agent: start → squad → Task(squad-operator)
+2. Operator (in separate session): assign → update → complete
+3. Primary agent: receives summary only
+
 **Actions:**
 - \`start\`: Start new session (goal required)
 - \`squad\`: Create new squad (mission, operator required)

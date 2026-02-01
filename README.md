@@ -2,6 +2,8 @@
 
 <div align="center">
 
+<img src="docs/images/hero.png" width="800" alt="Maskweaver Hero Image">
+
 > **The npm for AI personas** — Level up your OpenCode assistant with expert personalities
 
 [![GitHub Release](https://img.shields.io/github/v/release/ulgerang/maskweaver?color=369eff&labelColor=black&logo=github&style=flat-square)](https://github.com/ulgerang/maskweaver/releases)

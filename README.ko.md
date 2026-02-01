@@ -2,6 +2,8 @@
 
 <div align="center">
 
+<img src="docs/images/hero.png" width="800" alt="Maskweaver Hero Image">
+
 > **AI 페르소나를 위한 npm** — OpenCode 어시스턴트에게 독보적인 전문가 인격을 더하세요
 
 [![GitHub Release](https://img.shields.io/github/v/release/ulgerang/maskweaver?color=369eff&labelColor=black&logo=github&style=flat-square)](https://github.com/ulgerang/maskweaver/releases)

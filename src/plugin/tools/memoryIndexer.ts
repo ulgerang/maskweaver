@@ -4,8 +4,49 @@
 
 import { z } from "zod";
 import { indexFile, reindexFile, indexAllMemoryFiles } from "../../memory/index.js";
-import { createProvider } from "../../memory/index.js";
+import { createProvider, selectBestProvider } from "../../memory/index.js";
+import type { ProviderConfig } from "../../memory/index.js";
 import type { ToolFactory, ToolContext } from "../types.js";
+import { getMemoryProviderConfig } from "../../shared/config.js";
+
+/**
+ * Get embedding provider based on configuration
+ */
+async function getConfiguredProvider(worktree: string) {
+  // Try to load config from maskweaver.config.json
+  const memoryConfig = getMemoryProviderConfig(worktree);
+  
+  if (memoryConfig && memoryConfig.provider) {
+    const providerConfig: ProviderConfig = {
+      type: memoryConfig.provider,
+      model: memoryConfig.model,
+      dimensions: memoryConfig.dimensions,
+      baseUrl: memoryConfig.baseUrl || "http://localhost:11434",
+    };
+    
+    try {
+      const provider = createProvider(providerConfig);
+      const health = await provider.healthCheck();
+      
+      if (health.ok) {
+        return provider;
+      }
+      
+      console.warn(`Configured provider ${memoryConfig.provider} failed: ${health.reason}`);
+    } catch (error) {
+      console.warn(`Failed to create provider: ${error}`);
+    }
+  }
+  
+  // Fallback
+  const fallbackConfigs: ProviderConfig[] = [
+    { type: "ollama", model: "bge-m3", dimensions: 1024 },
+    { type: "ollama", model: "nomic-embed-text", dimensions: 768 },
+    { type: "text-only" },
+  ];
+  
+  return selectBestProvider(fallbackConfigs);
+}
 
 export function createMemoryIndexerTool(): ToolFactory {
   return {
@@ -23,12 +64,8 @@ Actions:
       try {
         const basePath = context.worktree;
 
-        // Create embedding provider
-        const provider = await createProvider({
-          type: "ollama",
-          model: "bge-m3",
-          baseUrl: "http://localhost:11434",
-        });
+        // Create embedding provider from config
+        const provider = await getConfiguredProvider(basePath);
 
         const getEmbedding = async (text: string): Promise<number[]> => {
           const embeddings = await provider.embed([text]);

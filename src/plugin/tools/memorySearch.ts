@@ -13,15 +13,16 @@
  */
 
 import { z } from "zod";
-import type { IEmbeddingProvider, SearchResult, SourceType } from "../../memory/index.js";
+import type { IEmbeddingProvider, SearchResult, SourceType, ProviderConfig } from "../../memory/index.js";
 import {
   hybridSearch,
   initDatabase,
   getDbPath,
   selectBestProvider,
-  getDefaultConfigs,
+  createProvider,
   CONFIG,
 } from "../../memory/index.js";
+import { getMemoryProviderConfig } from "../../shared/config.js";
 import path from "node:path";
 
 // ============================================================================
@@ -63,17 +64,62 @@ type MemorySearchArgs = z.infer<typeof memorySearchArgsSchema>;
  * - Shared across all search calls
  */
 let providerInstance: IEmbeddingProvider | null = null;
+let providerWorktree: string | null = null;
 
 /**
  * Get or initialize the embedding provider
  * 
+ * Reads configuration from maskweaver.config.json if available.
+ * Falls back to default provider chain if no config found.
+ * 
+ * @param worktree - Project root path for config lookup
  * @returns Initialized provider (may be text-only fallback)
  */
-async function getProvider(): Promise<IEmbeddingProvider> {
-  if (!providerInstance) {
-    const configs = getDefaultConfigs();
-    providerInstance = await selectBestProvider(configs);
+async function getProvider(worktree: string): Promise<IEmbeddingProvider> {
+  // Return cached provider if same worktree
+  if (providerInstance && providerWorktree === worktree) {
+    return providerInstance;
   }
+  
+  // Try to load config from maskweaver.config.json
+  const memoryConfig = getMemoryProviderConfig(worktree);
+  
+  if (memoryConfig && memoryConfig.provider) {
+    // Use configured provider
+    const providerConfig: ProviderConfig = {
+      type: memoryConfig.provider,
+      model: memoryConfig.model,
+      dimensions: memoryConfig.dimensions,
+      baseUrl: memoryConfig.baseUrl || "http://localhost:11434",
+    };
+    
+    try {
+      const provider = createProvider(providerConfig);
+      const health = await provider.healthCheck();
+      
+      if (health.ok) {
+        providerInstance = provider;
+        providerWorktree = worktree;
+        return provider;
+      }
+      
+      console.warn(`Configured provider ${memoryConfig.provider} failed: ${health.reason}`);
+      if (health.hint) console.warn(`  Hint: ${health.hint}`);
+    } catch (error) {
+      console.warn(`Failed to create provider: ${error}`);
+    }
+  }
+  
+  // Fallback: Try Ollama with bge-m3 (common default)
+  const fallbackConfigs: ProviderConfig[] = [
+    { type: "ollama", model: "bge-m3", dimensions: 1024 },
+    { type: "ollama", model: "nomic-embed-text", dimensions: 768 },
+    { type: "text-only" },
+  ];
+  
+  providerInstance = await selectBestProvider(fallbackConfigs);
+  providerWorktree = worktree;
+  
   return providerInstance;
 }
 
@@ -122,7 +168,7 @@ Keywords: "remember", "before", "last time", "previous"`,
         // ====================================================================
         // 2. Get Embedding Provider (lazy initialization)
         // ====================================================================
-        const provider = await getProvider();
+        const provider = await getProvider(context.worktree);
 
         // Generate query embedding (embed takes array, returns array)
         const embeddingResults = await provider.embed([args.query]);

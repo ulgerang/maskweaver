@@ -1,4 +1,6 @@
 import type { LogLevel } from "./types.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 /**
  * Memory provider types
@@ -160,3 +162,87 @@ export const DEFAULT_CONFIG: MaskweaverConfig = {
     level: "info",
   },
 };
+
+// ============================================================================
+// Runtime Configuration (maskweaver.config.json)
+// ============================================================================
+
+/**
+ * Runtime memory configuration from maskweaver.config.json
+ */
+export interface RuntimeMemoryConfig {
+  provider: MemoryProviderType;
+  model?: string;
+  dimensions?: number;
+  enabled?: boolean;
+  baseUrl?: string;
+}
+
+/**
+ * Runtime configuration from maskweaver.config.json
+ */
+export interface RuntimeConfig {
+  dummyHumans?: Record<string, string>;
+  memory?: RuntimeMemoryConfig;
+  language?: string;
+}
+
+let cachedRuntimeConfig: RuntimeConfig | null = null;
+let cachedConfigPath: string | null = null;
+
+/**
+ * Load maskweaver.config.json from project root
+ * 
+ * Searches in order:
+ * 1. {basePath}/maskweaver.config.json
+ * 2. {basePath}/.opencode/maskweaver.config.json
+ */
+export function loadRuntimeConfig(basePath: string = process.cwd()): RuntimeConfig {
+  // Return cached config if same path
+  if (cachedRuntimeConfig && cachedConfigPath === basePath) {
+    return cachedRuntimeConfig;
+  }
+  
+  const locations = [
+    path.join(basePath, "maskweaver.config.json"),
+    path.join(basePath, ".opencode", "maskweaver.config.json"),
+  ];
+  
+  for (const location of locations) {
+    if (fs.existsSync(location)) {
+      try {
+        const content = fs.readFileSync(location, "utf-8");
+        const config = JSON.parse(content) as RuntimeConfig;
+        
+        cachedRuntimeConfig = config;
+        cachedConfigPath = basePath;
+        
+        return config;
+      } catch (error) {
+        console.warn(`Failed to parse ${location}: ${error}`);
+      }
+    }
+  }
+  
+  // Return empty config if not found
+  cachedRuntimeConfig = {};
+  cachedConfigPath = basePath;
+  
+  return {};
+}
+
+/**
+ * Get memory provider configuration from runtime config
+ */
+export function getMemoryProviderConfig(basePath: string = process.cwd()): RuntimeMemoryConfig | undefined {
+  const config = loadRuntimeConfig(basePath);
+  return config.memory;
+}
+
+/**
+ * Clear cached runtime config (for testing)
+ */
+export function clearRuntimeConfigCache(): void {
+  cachedRuntimeConfig = null;
+  cachedConfigPath = null;
+}

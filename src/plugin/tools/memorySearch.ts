@@ -117,7 +117,7 @@ Keywords: "remember", "before", "last time", "previous"`,
         // 1. Initialize Database
         // ====================================================================
         const dbPath = getDbPath(context.worktree);
-        initDatabase(dbPath);
+        await initDatabase(dbPath);
 
         // ====================================================================
         // 2. Get Embedding Provider (lazy initialization)

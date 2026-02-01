@@ -127,7 +127,7 @@ export async function indexFile(
   console.log(`[Indexer] Processing: ${filePath}`);
 
   // Initialize database
-  initDatabase(getDbPath(basePath));
+  await initDatabase(getDbPath(basePath));
 
   // Process file
   const chunks = await processFile(filePath);
@@ -166,7 +166,7 @@ export async function reindexFile(
 ): Promise<void> {
   console.log(`[Indexer] Reindexing: ${filePath}`);
 
-  initDatabase(getDbPath(basePath));
+  await initDatabase(getDbPath(basePath));
 
   // Delete existing chunks
   deleteChunksByPath(filePath);
@@ -192,7 +192,7 @@ export async function indexAllMemoryFiles(
 ): Promise<void> {
   console.log(`[Indexer] Scanning directory: ${baseDir}`);
 
-  initDatabase(getDbPath(basePath || baseDir));
+  await initDatabase(getDbPath(basePath || baseDir));
 
   // Main memory files
   const mainFiles = ['MEMORY.md', 'MASKS.md', 'RETROSPECT.md', 'USER.md'];

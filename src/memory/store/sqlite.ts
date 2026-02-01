@@ -3,9 +3,11 @@
  * 
  * Uses better-sqlite3 for Node.js compatibility.
  * WAL mode for concurrent access.
+ * 
+ * NOTE: better-sqlite3 is an optional dependency.
+ * This module uses dynamic import to avoid errors when not installed.
  */
 
-import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import {
@@ -16,6 +18,26 @@ import {
   blobToEmbedding,
   toFloat32Array,
 } from '../core.js';
+
+// Dynamic import for better-sqlite3
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let DatabaseConstructor: any = null;
+
+async function loadDatabase(): Promise<any> {
+  if (DatabaseConstructor) return DatabaseConstructor;
+  
+  try {
+    const module = await import('better-sqlite3');
+    DatabaseConstructor = module.default;
+    return DatabaseConstructor;
+  } catch (error) {
+    throw new Error(
+      '[Memory DB] better-sqlite3 is not installed. ' +
+      'Install it with: npm install better-sqlite3\n' +
+      'Or disable memory features in your configuration.'
+    );
+  }
+}
 
 // ============================================================================
 // Types
@@ -56,10 +78,20 @@ interface FtsRow {
 // ============================================================================
 
 export class MemoryDatabase {
-  private db: Database.Database;
-  private statements: Map<string, Database.Statement> = new Map();
+  private db: any; // Database.Database type
+  private statements: Map<string, any> = new Map();
 
-  constructor(dbPath: string) {
+  private constructor(db: any) {
+    this.db = db;
+  }
+
+  /**
+   * Create a new MemoryDatabase instance.
+   * Uses async factory pattern because better-sqlite3 is dynamically imported.
+   */
+  static async create(dbPath: string): Promise<MemoryDatabase> {
+    const DatabaseClass = await loadDatabase();
+    
     // Ensure directory exists
     const dir = dirname(dbPath);
     if (!existsSync(dir)) {
@@ -67,19 +99,23 @@ export class MemoryDatabase {
     }
 
     // Open database
-    this.db = new Database(dbPath);
+    const db = new DatabaseClass(dbPath);
 
     // Enable WAL mode for concurrency
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('synchronous = NORMAL');
-    this.db.pragma('cache_size = -64000'); // 64MB
-    this.db.pragma('temp_store = MEMORY');
+    db.pragma('journal_mode = WAL');
+    db.pragma('synchronous = NORMAL');
+    db.pragma('cache_size = -64000'); // 64MB
+    db.pragma('temp_store = MEMORY');
 
+    const instance = new MemoryDatabase(db);
+    
     // Initialize schema
-    this.initSchema();
+    instance.initSchema();
     
     // Prepare statements
-    this.prepareStatements();
+    instance.prepareStatements();
+    
+    return instance;
   }
 
   /**
@@ -485,11 +521,11 @@ export class MemoryDatabase {
 
 let defaultInstance: MemoryDatabase | null = null;
 
-export function initDatabase(dbPath: string): MemoryDatabase {
+export async function initDatabase(dbPath: string): Promise<MemoryDatabase> {
   if (defaultInstance) {
     defaultInstance.close();
   }
-  defaultInstance = new MemoryDatabase(dbPath);
+  defaultInstance = await MemoryDatabase.create(dbPath);
   return defaultInstance;
 }
 

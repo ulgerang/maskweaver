@@ -1,0 +1,111 @@
+{
+  "name": "maskweaver",
+  "version": "0.7.0",
+  "description": "AI Expert Persona System - Give your AI coding assistant expert personalities (가면술사)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "maskweaver": "./dist/cli/install.js"
+  },
+  "files": [
+    "dist",
+    "masks",
+    "assets"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./cli": {
+      "import": "./dist/cli/install.js"
+    },
+    "./plugin": {
+      "import": "./dist/plugin/index.js",
+      "types": "./dist/plugin/index.d.ts"
+    },
+    "./memory": {
+      "import": "./dist/memory/index.js",
+      "types": "./dist/memory/index.d.ts"
+    },
+    "./context": {
+      "import": "./dist/context/index.js",
+      "types": "./dist/context/index.d.ts"
+    },
+    "./retrospect": {
+      "import": "./dist/retrospect/index.js",
+      "types": "./dist/retrospect/index.d.ts"
+    },
+    "./verify": {
+      "import": "./dist/verify/index.js",
+      "types": "./dist/verify/index.d.ts"
+    },
+    "./core": {
+      "import": "./dist/core/index.js",
+      "types": "./dist/core/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:bun": "bun build ./src/index.ts --outdir dist --target node",
+    "clean": "rm -rf dist",
+    "dev": "tsc --watch",
+    "test": "bun test",
+    "lint": "eslint src --ext .ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "ai",
+    "persona",
+    "mask",
+    "expert",
+    "maskweaver",
+    "cli",
+    "embedding",
+    "memory",
+    "context",
+    "retrospect"
+  ],
+  "author": "ULJI SOFT <ulgerang@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ulgerang/maskweaver.git"
+  },
+  "homepage": "https://github.com/ulgerang/maskweaver#readme",
+  "bugs": {
+    "url": "https://github.com/ulgerang/maskweaver/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "jsonc-parser": "^3.2.0",
+    "yaml": "^2.3.0",
+    "zod": "^3.22.0"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/bun": "latest",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^9.0.0"
+  }
+}

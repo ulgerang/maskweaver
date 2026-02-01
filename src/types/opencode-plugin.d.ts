@@ -37,9 +37,7 @@ declare module "@opencode-ai/plugin" {
     ) => Promise<void>;
     tool?: Record<string, ToolDefinition>;
     event?: (context: { event: PluginEvent }) => Promise<void>;
-    config?: {
-      agent?: (config: unknown, context?: { name?: string }) => Promise<unknown>;
-    };
+    config?: (config: any) => Promise<void>;
   }
 
   export interface ToolDefinition {

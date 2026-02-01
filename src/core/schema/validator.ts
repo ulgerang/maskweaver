@@ -110,7 +110,7 @@ export function validateMask(mask: unknown): ValidationResult {
   
   return {
     success: false,
-    errors: result.error.errors.map(err => ({
+    errors: (result.error as any).issues.map((err: any) => ({
       path: err.path.join('.'),
       message: err.message,
     })),

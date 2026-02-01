@@ -16,34 +16,55 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
     "./cli": {
-      "import": "./dist/cli/install.js"
+      "import": "./dist/cli/install.js",
+      "require": "./dist/cli/install.js",
+      "default": "./dist/cli/install.js"
     },
     "./plugin": {
       "import": "./dist/plugin/index.js",
+      "require": "./dist/plugin/index.js",
+      "default": "./dist/plugin/index.js",
       "types": "./dist/plugin/index.d.ts"
     },
     "./memory": {
       "import": "./dist/memory/index.js",
+      "require": "./dist/memory/index.js",
+      "default": "./dist/memory/index.js",
       "types": "./dist/memory/index.d.ts"
     },
     "./context": {
       "import": "./dist/context/index.js",
+      "require": "./dist/context/index.js",
+      "default": "./dist/context/index.js",
       "types": "./dist/context/index.d.ts"
     },
     "./retrospect": {
       "import": "./dist/retrospect/index.js",
+      "require": "./dist/retrospect/index.js",
+      "default": "./dist/retrospect/index.js",
       "types": "./dist/retrospect/index.d.ts"
     },
     "./verify": {
       "import": "./dist/verify/index.js",
+      "require": "./dist/verify/index.js",
+      "default": "./dist/verify/index.js",
       "types": "./dist/verify/index.d.ts"
     },
     "./core": {
       "import": "./dist/core/index.js",
+      "require": "./dist/core/index.js",
+      "default": "./dist/core/index.js",
       "types": "./dist/core/index.d.ts"
+    },
+    "./lib": {
+      "import": "./dist/lib.js",
+      "default": "./dist/lib.js",
+      "types": "./dist/lib.d.ts"
     }
   },
   "scripts": {
@@ -89,7 +110,7 @@
     "commander": "^12.0.0",
     "jsonc-parser": "^3.2.0",
     "yaml": "^2.3.0",
-    "zod": "^3.22.0"
+    "zod": "4.1.8"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.0.0"
@@ -100,6 +121,7 @@
     }
   },
   "devDependencies": {
+    "@opencode-ai/plugin": "^1.1.48",
     "@types/better-sqlite3": "^7.6.8",
     "@types/bun": "latest",
     "@types/node": "^20.0.0",

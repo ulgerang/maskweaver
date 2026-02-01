@@ -14,12 +14,12 @@
  * Based on oh-my-opencode plugin development patterns.
  */
 
-import type { Plugin } from '@opencode-ai/plugin';
+import { tool, type Plugin } from '@opencode-ai/plugin';
+const z = tool.schema;
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { z } from 'zod';
 import {
   loadPluginConfig,
   isMaskEnabled,
@@ -829,28 +829,56 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
   // ==========================================================================
   const isToolActive = (toolName: string) => isToolEnabled(pluginConfig, toolName);
   
+  // Helper to ensure tool arguments are compatible with opencode's expected format.
+  // opencode expects a ZodRawShape (raw object), NOT a ZodObject instance.
+  const wrapSchema = (schema: any): any => {
+    if (!schema || typeof schema !== 'object') return schema;
+    
+    // If it's a ZodObject (Zod 4), extract its shape
+    if (schema.def && typeof schema.def === 'object' && schema.type === 'object') {
+      return schema.def.shape;
+    }
+    
+    // If it's a ZodObject (Zod 3), extract its shape
+    if (schema._def && typeof schema._def.shape === 'function') {
+      return schema._def.shape();
+    }
+    
+    return schema;
+  };
+
   const tools: Record<string, any> = {};
   
   if (state.maskLoader) {
     if (isToolActive('list_masks')) {
-      tools.list_masks = createListMasksTool(state.maskLoader, getActiveMask);
+      const tool = createListMasksTool(state.maskLoader, getActiveMask);
+      tool.args = wrapSchema(tool.args);
+      tools.list_masks = tool;
     }
     
     if (isToolActive('select_mask')) {
-      tools.select_mask = createSelectMaskTool(state.maskLoader, getActiveMask, setActiveMask);
+      const tool = createSelectMaskTool(state.maskLoader, getActiveMask, setActiveMask);
+      tool.args = wrapSchema(tool.args);
+      tools.select_mask = tool;
     }
     
     if (isToolActive('deselect_mask')) {
-      tools.deselect_mask = createDeselectMaskTool(getActiveMask, setActiveMask);
+      const tool = createDeselectMaskTool(getActiveMask, setActiveMask);
+      tool.args = wrapSchema(tool.args);
+      tools.deselect_mask = tool;
     }
     
     if (isToolActive('get_mask_prompt')) {
-      tools.get_mask_prompt = createGetMaskPromptTool(state.maskLoader, getActiveMask);
+      const tool = createGetMaskPromptTool(state.maskLoader, getActiveMask);
+      tool.args = wrapSchema(tool.args);
+      tools.get_mask_prompt = tool;
     }
   }
   
   if (isToolActive('maskweaver_status')) {
-    tools.maskweaver_status = createMaskweaverStatusTool(state.maskLoader, masksDir, getActiveMask);
+    const tool = createMaskweaverStatusTool(state.maskLoader, masksDir, getActiveMask);
+    tool.args = wrapSchema(tool.args);
+    tools.maskweaver_status = tool;
   }
 
   // Memory tools
@@ -858,7 +886,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const memorySearchTool = createMemorySearchTool();
     tools.memory_search = {
       description: memorySearchTool.description,
-      args: memorySearchTool.args,
+      args: wrapSchema(memorySearchTool.args),
       execute: (args: any) => memorySearchTool.execute(args, { worktree: directory }),
     };
   }
@@ -867,7 +895,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const memoryWriteTool = createMemoryWriteTool();
     tools.memory_write = {
       description: memoryWriteTool.description,
-      args: memoryWriteTool.args,
+      args: wrapSchema(memoryWriteTool.args),
       execute: (args: any) => memoryWriteTool.execute(args, { worktree: directory }),
     };
   }
@@ -876,7 +904,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const memoryGetTool = createMemoryGetTool();
     tools.memory_get = {
       description: memoryGetTool.description,
-      args: memoryGetTool.args,
+      args: wrapSchema(memoryGetTool.args),
       execute: (args: any) => memoryGetTool.execute(args, { worktree: directory }),
     };
   }
@@ -885,7 +913,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const memoryIndexerTool = createMemoryIndexerTool();
     tools.memory_indexer = {
       description: memoryIndexerTool.description,
-      args: memoryIndexerTool.args,
+      args: wrapSchema(memoryIndexerTool.args),
       execute: (args: any) => memoryIndexerTool.execute(args, { worktree: directory }),
     };
   }
@@ -895,7 +923,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const contextTool = createContextTool();
     tools.context = {
       description: contextTool.description,
-      args: contextTool.args,
+      args: wrapSchema(contextTool.args),
       execute: (args: any) => contextTool.execute(args, { worktree: directory }),
     };
   }
@@ -905,7 +933,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const retrospectTool = createRetrospectTool();
     tools.retrospect = {
       description: retrospectTool.description,
-      args: retrospectTool.args,
+      args: wrapSchema(retrospectTool.args),
       execute: (args: any) => retrospectTool.execute(args, { worktree: directory }),
     };
   }
@@ -915,7 +943,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const maskSaveTool = createMaskSaveTool();
     tools.mask_save = {
       description: maskSaveTool.description,
-      args: maskSaveTool.args,
+      args: wrapSchema(maskSaveTool.args),
       execute: (args: any) => maskSaveTool.execute(args, { worktree: directory }),
     };
   }
@@ -976,42 +1004,11 @@ ${buildRichPrompt(state.activeMask)}
       }
     },
     
-    // Config hook - agent overrides (oh-my-opencode pattern)
-    config: {
-      agent: async (agentConfig: unknown, context?: { name?: string }) => {
-        // Apply agent overrides from configuration
-        const agentName = context?.name;
-        if (!agentName) return agentConfig;
-        
-        const override = getAgentOverride(pluginConfig, agentName);
-        if (!override) return agentConfig;
-        
-        const modified: Record<string, unknown> = { ...(agentConfig as Record<string, unknown>) };
-        
-        if (override.model) {
-          modified.model = override.model;
-          if (verbose) {
-            client.app.log({
-              service: 'maskweaver',
-              level: 'info',
-              message: `Agent "${agentName}" model overridden: ${override.model}`,
-            });
-          }
-        }
-        
-        if (override.systemPrompt) {
-          modified.systemPrompt = override.systemPrompt;
-          if (verbose) {
-            client.app.log({
-              service: 'maskweaver',
-              level: 'info',
-              message: `Agent "${agentName}" system prompt overridden`,
-            });
-          }
-        }
-        
-        return modified;
-      },
+    // Config hook - (oh-my-opencode pattern)
+    config: async (config: any) => {
+      // NOTE: Current opencode version expects config to be a function, not an object.
+      // Agent overrides are currently not supported via this hook in opencode core.
+      return;
     },
   };
 };

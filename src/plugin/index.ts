@@ -20,6 +20,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import {
   loadPluginConfig,
   isMaskEnabled,
@@ -52,30 +53,26 @@ interface InstallResult {
 }
 
 function getAssetsDir(): string {
-  // In ESM, use import.meta.url to find the assets directory
-  // When installed via npm: node_modules/@maskweaver/plugin/dist/index.js -> ../assets
-  // When local file: plugins/maskweaver.js -> ./assets (same directory)
   try {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
     
-    // First try: assets as sibling (npm package structure: dist/../assets)
-    const npmAssets = path.join(__dirname, '..', 'assets');
-    if (fs.existsSync(npmAssets)) {
-      return npmAssets;
+    // 1. If in dist/plugin/ (production) -> ../../assets
+    const distAssets = path.join(__dirname, '..', '..', 'assets');
+    if (fs.existsSync(distAssets)) {
+      return distAssets;
     }
     
-    // Second try: assets as subdirectory (local file: plugins/assets)
-    const localAssets = path.join(__dirname, 'assets');
-    if (fs.existsSync(localAssets)) {
-      return localAssets;
+    // 2. If in src/plugin/ (development) -> ../../assets
+    const srcAssets = path.join(__dirname, '..', '..', 'assets');
+    if (fs.existsSync(srcAssets)) {
+      return srcAssets;
     }
     
-    // Fallback to npm structure
-    return npmAssets;
+    // 3. Fallback for npm package structure (node_modules/maskweaver/dist/plugin/index.js)
+    return distAssets;
   } catch {
-    // Fallback for CommonJS or other environments
-    return path.join(__dirname, '..', 'assets');
+    return path.join(process.cwd(), 'assets');
   }
 }
 
@@ -118,28 +115,42 @@ function installAssets(projectDir: string): InstallResult {
   };
   
   const assetsDir = getAssetsDir();
-  const opencodeDir = path.join(projectDir, '.opencode');
+  const homeDir = os.homedir();
+  const globalConfigDir = path.join(homeDir, '.config', 'opencode');
+  const projectOpencodeDir = path.join(projectDir, '.opencode');
   
-  // Ensure .opencode directory exists
-  if (!fs.existsSync(opencodeDir)) {
-    fs.mkdirSync(opencodeDir, { recursive: true });
+  // Install to both global and project directories to ensure visibility
+  const targetDirs = [projectOpencodeDir];
+  if (fs.existsSync(globalConfigDir)) {
+    targetDirs.push(globalConfigDir);
   }
   
-  // Install agents
-  const agentsSrc = path.join(assetsDir, 'agents');
-  const agentsDest = path.join(opencodeDir, 'agents');
-  copyDirRecursive(agentsSrc, agentsDest, result);
-  
-  // Install masks
-  const masksSrc = path.join(assetsDir, 'masks');
-  const masksDest = path.join(opencodeDir, 'masks');
-  copyDirRecursive(masksSrc, masksDest, result);
-  
-  // Install commands (if any)
-  const commandsSrc = path.join(assetsDir, 'commands');
-  const commandsDest = path.join(opencodeDir, 'commands');
-  if (fs.existsSync(commandsSrc)) {
-    copyDirRecursive(commandsSrc, commandsDest, result);
+  for (const targetDir of targetDirs) {
+    if (!fs.existsSync(targetDir)) {
+      try {
+        fs.mkdirSync(targetDir, { recursive: true });
+      } catch (e) {
+        result.errors.push(`Failed to create directory ${targetDir}: ${e}`);
+        continue;
+      }
+    }
+    
+    // Install agents
+    const agentsSrc = path.join(assetsDir, 'agents');
+    const agentsDest = path.join(targetDir, 'agents');
+    copyDirRecursive(agentsSrc, agentsDest, result);
+    
+    // Install masks
+    const masksSrc = path.join(assetsDir, 'masks');
+    const masksDest = path.join(targetDir, 'masks');
+    copyDirRecursive(masksSrc, masksDest, result);
+    
+    // Install commands (if any)
+    const commandsSrc = path.join(assetsDir, 'commands');
+    const commandsDest = path.join(targetDir, 'commands');
+    if (fs.existsSync(commandsSrc)) {
+      copyDirRecursive(commandsSrc, commandsDest, result);
+    }
   }
   
   return result;
@@ -700,6 +711,58 @@ let state: PluginState | null = null;
 // Plugin (oh-my-opencode pattern)
 // ============================================================================
 
+// ============================================================================
+// Agent Utilities
+// ============================================================================
+
+interface AgentDefinition {
+  name?: string;
+  description?: string;
+  mode?: 'primary' | 'subagent';
+  model?: string;
+  temperature?: number;
+  prompt?: string;
+  tools?: Record<string, boolean>;
+  permission?: Record<string, string | Record<string, string>>;
+}
+
+function parseAgentMarkdown(content: string): AgentDefinition {
+  const parts = content.split('---');
+  if (parts.length < 3) {
+    return { prompt: content.trim() };
+  }
+  
+  try {
+    const frontmatter = parseYaml(parts[1]);
+    const prompt = parts.slice(2).join('---').trim();
+    return { ...frontmatter, prompt };
+  } catch (e) {
+    return { prompt: content.trim() };
+  }
+}
+
+function loadAgentAssets(assetsDir: string): Record<string, AgentDefinition> {
+  const agentsDir = path.join(assetsDir, 'agents');
+  const agents: Record<string, AgentDefinition> = {};
+  
+  if (!fs.existsSync(agentsDir)) return agents;
+  
+  try {
+    const files = fs.readdirSync(agentsDir);
+    for (const file of files) {
+      if (file.endsWith('.md') && file !== 'dummy-template.md') {
+        const agentId = path.basename(file, '.md');
+        const content = fs.readFileSync(path.join(agentsDir, file), 'utf-8');
+        agents[agentId] = parseAgentMarkdown(content);
+      }
+    }
+  } catch (e) {
+    // Ignore errors
+  }
+  
+  return agents;
+}
+
 export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
   // ==========================================================================
   // 1. Load Configuration (oh-my-opencode pattern)
@@ -949,9 +1012,45 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
   }
   
   // ==========================================================================
-  // 7. Return plugin hooks
+  // 8. Load and register agents
+  // ==========================================================================
+  const assetsDir = getAssetsDir();
+  const loadedAgents = loadAgentAssets(assetsDir);
+  
+  // Add variants for dummy-human
+  if (loadedAgents['dummy-human']) {
+    if (!loadedAgents['dummy-flash']) {
+      loadedAgents['dummy-flash'] = {
+        ...loadedAgents['dummy-human'],
+        description: 'Dummy-Human (Flash) - Fast and cheap',
+        model: 'google/gemini-2.0-flash',
+      };
+    }
+    if (!loadedAgents['dummy-premium']) {
+      loadedAgents['dummy-premium'] = {
+        ...loadedAgents['dummy-human'],
+        description: 'Dummy-Human (Premium) - Powerful and reasoning',
+        model: 'google/gemini-2.0-pro-exp-02-05',
+      };
+    }
+  }
+
+  // Apply config overrides to agents
+  for (const agentId of Object.keys(loadedAgents)) {
+    const override = getAgentOverride(pluginConfig, agentId);
+    if (override) {
+      if (override.model) loadedAgents[agentId].model = override.model;
+      if (override.systemPrompt) loadedAgents[agentId].prompt = override.systemPrompt;
+    }
+  }
+
+  // ==========================================================================
+  // 9. Return plugin hooks
   // ==========================================================================
   return {
+    // Agent registration
+    agent: loadedAgents,
+
     // System prompt transform - inject active mask
     'experimental.chat.system.transform': async (_input, output) => {
       if (state?.activeMask) {

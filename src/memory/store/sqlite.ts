@@ -19,25 +19,44 @@ import {
   toFloat32Array,
 } from '../core.js';
 
-// Dynamic import for better-sqlite3
+// Dynamic import for better-sqlite3 or bun:sqlite
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let DatabaseConstructor: any = null;
+let isBun = false;
+
+// Check if running in Bun at module level
+// @ts-ignore
+const IS_BUN = typeof Bun !== 'undefined';
 
 async function loadDatabase(): Promise<any> {
   if (DatabaseConstructor) return DatabaseConstructor;
+
+  // In Bun environment, use bun:sqlite exclusively
+  if (IS_BUN) {
+    // @ts-ignore
+    const { Database } = await import('bun:sqlite');
+    DatabaseConstructor = Database;
+    isBun = true;
+    return DatabaseConstructor;
+  }
   
+  // In Node.js environment, use better-sqlite3
+  // Use Function constructor to avoid Bun's static analysis of import()
   try {
-    const module = await import('better-sqlite3');
+    const dynamicImport = new Function('specifier', 'return import(specifier)');
+    const module = await dynamicImport('better-sqlite3');
     DatabaseConstructor = module.default;
+    isBun = false;
     return DatabaseConstructor;
   } catch (error) {
     throw new Error(
-      '[Memory DB] better-sqlite3 is not installed. ' +
-      'Install it with: npm install better-sqlite3\n' +
-      'Or disable memory features in your configuration.'
+      '[Memory DB] SQLite driver not found. ' +
+      'In Node.js: npm install better-sqlite3. ' +
+      'In Bun: bun:sqlite should be available.'
     );
   }
 }
+
 
 // ============================================================================
 // Types
@@ -102,10 +121,16 @@ export class MemoryDatabase {
     const db = new DatabaseClass(dbPath);
 
     // Enable WAL mode for concurrency
-    db.pragma('journal_mode = WAL');
-    db.pragma('synchronous = NORMAL');
-    db.pragma('cache_size = -64000'); // 64MB
-    db.pragma('temp_store = MEMORY');
+    if (isBun) {
+      db.exec('PRAGMA journal_mode = WAL');
+      db.exec('PRAGMA synchronous = NORMAL');
+    } else {
+      db.pragma('journal_mode = WAL');
+      db.pragma('synchronous = NORMAL');
+      db.pragma('cache_size = -64000'); // 64MB
+      db.pragma('temp_store = MEMORY');
+    }
+
 
     const instance = new MemoryDatabase(db);
     
@@ -493,12 +518,22 @@ export class MemoryDatabase {
     const embeddingCount = (this.db.prepare('SELECT COUNT(*) as count FROM embeddings').get() as { count: number }).count;
     const maskUsageCount = (this.db.prepare('SELECT COUNT(*) as count FROM mask_usage').get() as { count: number }).count;
 
-    const pageCount = (this.db.pragma('page_count', { simple: true }) as number);
-    const pageSize = (this.db.pragma('page_size', { simple: true }) as number);
+    let pageCount = 0;
+    let pageSize = 0;
+
+    if (isBun) {
+      pageCount = (this.db.prepare('PRAGMA page_count').get() as any)['page_count'];
+      pageSize = (this.db.prepare('PRAGMA page_size').get() as any)['page_size'];
+    } else {
+      pageCount = (this.db.pragma('page_count', { simple: true }) as number);
+      pageSize = (this.db.pragma('page_size', { simple: true }) as number);
+    }
+    
     const dbSize = pageCount * pageSize;
 
     return { chunkCount, embeddingCount, maskUsageCount, dbSize };
   }
+
 
   rebuildFtsIndex(): void {
     this.db.exec("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')");

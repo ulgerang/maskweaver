@@ -6,6 +6,7 @@
  */
 
 // Schema types
+export type { Result } from '../shared/types.js';
 export type {
   MaskSchema,
   MaskMetadata,

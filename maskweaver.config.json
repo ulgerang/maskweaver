@@ -1,0 +1,14 @@
+{
+  "dummyHumans": {
+    "flash": "google/antigravity-gemini-3-flash",
+    "human": "google/antigravity-claude-opus-4-5-thinking",
+    "premium": "google/antigravity-claude-opus-4-5-thinking"
+  },
+  "memory": {
+    "provider": "ollama",
+    "model": "bge-m3",
+    "dimensions": 1024,
+    "enabled": true
+  },
+  "language": "ko"
+}

@@ -41,6 +41,7 @@ import { createMemoryIndexerTool } from './tools/memoryIndexer.js';
 import { createContextTool } from './tools/context.js';
 import { createRetrospectTool } from './tools/retrospect.js';
 import { createMaskSaveTool } from './tools/maskSave.js';
+import { createSquadTool } from './tools/squad.js';
 
 // ============================================================================
 // Asset Installer
@@ -1008,6 +1009,16 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
       description: maskSaveTool.description,
       args: wrapSchema(maskSaveTool.args),
       execute: (args: any) => maskSaveTool.execute(args, { worktree: directory }),
+    };
+  }
+
+  // Squad tool (multi-agent collaboration)
+  if (isToolActive('squad')) {
+    const squadTool = createSquadTool();
+    tools.squad = {
+      description: squadTool.description,
+      args: wrapSchema(squadTool.args),
+      execute: (args: any) => squadTool.execute(args, { worktree: directory }),
     };
   }
   

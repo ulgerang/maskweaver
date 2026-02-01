@@ -26,7 +26,8 @@ export class OpenAIProvider implements IEmbeddingProvider {
     
     this.apiKey = apiKey;
     this.model = config.model || "text-embedding-3-small";
-    this.baseUrl = config.baseUrl || "https://api.openai.com/v1";
+    const rawBaseUrl = config.baseUrl || process.env.MODEL_BASE_URL || "https://api.openai.com/v1";
+    this.baseUrl = rawBaseUrl.replace(/\/+$/, "");
     this.dimensions = this.validateDimensions(config.dimensions);
   }
 

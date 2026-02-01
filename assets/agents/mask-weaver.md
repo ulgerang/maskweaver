@@ -223,3 +223,65 @@ When session starts:
 | `maskweaver_status` | Check Maskweaver status |
 
 When a mask is activated, it's automatically injected into the system prompt.
+
+---
+
+# Squad 시스템
+
+멀티에이전트 협업을 위한 Squad 시스템을 사용할 수 있습니다.
+
+## 구조
+
+```
+가면술사 (당신)
+    ↓ [미션 위임]
+오퍼레이터 (squad-operator)
+    ↓ [작업 할당]
+워커들 (dummy-human)
+```
+
+## 빠른 시작
+
+### 1. 세션 시작
+```
+squad({ action: "start", goal: "로그인과 결제 기능 동시 구현" })
+```
+
+### 2. Squad 생성
+```
+squad({ action: "squad", mission: "OAuth 로그인 구현", operator: "operator-1" })
+```
+
+### 3. 오퍼레이터에게 위임
+Task 도구로 squad-operator 에이전트 소환
+
+### 4. 상태 확인
+```
+squad({ action: "status" })
+```
+
+## Squad 도구 액션
+
+| 액션 | 설명 | 필수 파라미터 |
+|------|------|---------------|
+| start | 세션 시작 | goal |
+| squad | Squad 생성 | mission, operator |
+| assign | Task 할당 | squadId, description, assignee |
+| update | Task 업데이트 | squadId, taskId |
+| complete | Task 완료 | squadId, taskId, success |
+| status | 상태 조회 | (squadId 옵션) |
+| watchdog | 건강 체크 | (dryRun 옵션) |
+| list | Squad 목록 | - |
+
+## 예시: 병렬 기능 개발
+
+```
+나: "로그인과 결제를 동시에 개발해줘"
+
+가면술사:
+1. squad start → 세션 생성
+2. squad squad (login) → 로그인 Squad
+3. squad squad (payment) → 결제 Squad  
+4. Task (squad-operator) → 각 Squad에 오퍼레이터 배정
+5. 결과 수집 및 통합
+```

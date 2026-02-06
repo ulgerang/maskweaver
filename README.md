@@ -24,6 +24,7 @@ While it can be used as a standalone library, it works great with OpenCode to ad
 - **Expert Personas (Masks)**: Standardized YAML profiles for legendary developers.
 - **Smart Delegation**: Multi-agent workflows optimized for OpenCode.
 - **Project Memory**: Hybrid semantic search for your entire codebase.
+- **🆕 Weave Workflow**: Phase-driven development with AI self-verification.
 
 ---
 
@@ -153,6 +154,75 @@ Smart subagents for cost-efficient multi-agent workflows:
 | `@dummy-human` | Balanced | 💰💰 | Code writing, reviews, general work |
 | `@dummy-premium` | Powerful | 💰💰💰 | Architecture, complex debugging |
 
+### 🧵 Weave Workflow (ZDD 4.0)
+
+**Phase-Driven Development** — "AI verifies, Human validates"
+
+Weave is Maskweaver's flagship workflow that implements **Zero-Defect Development 4.0**. It breaks work into testable phases, auto-selects expert masks, and runs self-verification loops before handing off to you.
+
+#### Commands
+
+| Command | Description |
+|---------|-------------|
+| `/weave design [docs]` | Analyze requirements → Generate phase plan |
+| `/weave craft [phase]` | Execute phase with auto-verification loop |
+| `/weave status` | View project progress and stats |
+| `/weave help` | Show documentation |
+
+#### Workflow
+
+```
+1. DESIGN: Analyze docs → Plan Phases
+       ↓
+2. CRAFT: For each Phase:
+   ├── Auto-select Mask 🎭
+   ├── Test First (Red)
+   ├── Implement (Green)
+   ├── Refactor
+   └── Self-Verify Loop ✅
+       ├── PASS → Next task
+       └── FAIL → Search Global Knowledge → Retry (max 5)
+       ↓
+3. HANDOFF: All tests pass → User validates feel & intent
+```
+
+#### Multi-Layer AI Verification
+
+Before handing off to you, AI runs these verification layers:
+
+| Layer | Type | Tool |
+|-------|------|------|
+| 1️⃣ TypeCheck | Build | `tsc --noEmit` |
+| 2️⃣ Lint | Build | `eslint` |
+| 3️⃣ Build | Build | `npm run build` |
+| 4️⃣ Unit Tests | Test | `jest` / `vitest` |
+| 5️⃣ E2E Tests | Test | **Playwright** |
+| 6️⃣ Screenshot | Visual | Playwright / browser capture |
+| 7️⃣ API Check | API | `fetch` health checks |
+| 8️⃣ A11y | Accessibility | `axe-core` |
+
+#### Autonomous Mask Selection
+
+The AI automatically picks the best expert for each task:
+
+| Task Type | Auto-Selected Mask |
+|-----------|-------------------|
+| Architecture/Design | 🏗️ Martin Fowler |
+| Testing/TDD | 🧪 Kent Beck |
+| React/Frontend | ⚛️ Dan Abramov |
+| Performance/Systems | 🐧 Linus Torvalds |
+| ML/AI | 🧠 Andrew Ng |
+
+#### Global Knowledge Base (Cross-Project RAG)
+
+Troubleshooting solutions are stored globally and shared across all projects:
+
+```
+Error occurs → Search ~/.maskweaver/knowledge.sqlite
+    ├── Found → Apply solution → Retry
+    └── Not found → Fix manually → Record solution for future
+```
+
 ### 🧠 Memory System
 
 Remember past conversations, decisions, and mask effectiveness:
@@ -226,12 +296,13 @@ Maskweaver is a single npm package with modular exports:
 import maskweaver from 'maskweaver';
 
 // Named exports - module namespaces
-import { core, memory, context, retrospect, verify } from 'maskweaver';
+import { core, memory, context, retrospect, verify, weave } from 'maskweaver';
 
 // Subpath imports - direct module access
 import { hybridSearch } from 'maskweaver/memory';
 import { createFeature } from 'maskweaver/context';
 import { MaskLoader } from 'maskweaver/core';
+import { WeaveOrchestrator, GlobalKnowledge } from 'maskweaver/weave';
 ```
 
 **Modules:**
@@ -240,7 +311,138 @@ import { MaskLoader } from 'maskweaver/core';
 - `maskweaver/context` - Feature-based work tracking
 - `maskweaver/verify` - Cross-mask code review
 - `maskweaver/retrospect` - Session effectiveness analysis
+- `maskweaver/weave` - Phase-driven development workflow
 - `maskweaver/plugin` - OpenCode plugin entry point
+
+---
+
+## 🧵 Weave Usage Guide
+
+### Step 1: Design Phase
+
+Start by analyzing your requirements:
+
+```bash
+/weave design docs/
+# or
+/weave design wiki/requirements.md
+```
+
+The AI will:
+1. Read all documents in the path
+2. Search memory for similar past projects
+3. Ask clarifying questions if needed
+4. Present a **Phase Plan** for your approval
+
+Example output:
+```markdown
+## 📋 Execution Plan
+
+### Vision
+Build a modern emotion diary app with AI-powered insights
+
+### Phases
+| Phase | Name | Done When | Est. Time |
+|-------|------|-----------|-----------|
+| P1 | Emotion Selection UI | User can select emotions | 2-3h |
+| P2 | Data Persistence | Emotions saved to storage | 2-3h |
+| P3 | History View | User can view past entries | 2-3h |
+
+Is this plan okay? Let me know if changes are needed.
+```
+
+### Step 2: Approve & Execute
+
+After approval, start executing:
+
+```bash
+/weave craft P1
+```
+
+The AI will:
+1. Select the best mask for each task (e.g., Kent Beck for tests)
+2. Write tests first (Red)
+3. Implement minimal code (Green)
+4. Refactor for quality
+5. Run multi-layer verification
+6. If fails: search Global Knowledge → retry up to 5 times
+7. Hand off to you for validation
+
+Progress output:
+```markdown
+### Task Progress
+
+#### Task 1: EmotionButton Component
+- [x] Mask: 🧪 Kent Beck
+- [x] Tests written
+- [x] Implementation
+- [x] Verified ✅
+
+#### Task 2: State Management
+- [x] Mask: ⚛️ Dan Abramov
+- [x] Tests written
+- [x] Implementation
+- [ ] Verifying 🔄 (retry 2/5)
+  - 💡 Similar solution found: "React state timing issue"
+  - Fix: Added useEffect dependency array
+```
+
+### Step 3: Handoff & Validate
+
+When all verifications pass:
+
+```markdown
+## ✅ Phase P1 Verification Complete!
+
+### 🤖 AI Test Results
+| Test | Result |
+|------|--------|
+| Build | ✅ Success |
+| Unit Tests | ✅ 15/15 |
+| Lint | ✅ Passed |
+
+### 🎭 Masks Used
+- Kent Beck (testing)
+- Dan Abramov (React components)
+
+### 🔗 Access
+http://localhost:5173
+
+### 👤 Human Validation (Only you can judge)
+- [ ] Does it feel right?
+- [ ] Is the UX good?
+- [ ] Is this what you wanted?
+
+**[Approve]** **[Request Changes]** **[Later]**
+```
+
+### Step 4: Check Status Anytime
+
+```bash
+/weave status
+```
+
+Output:
+```markdown
+## 📊 Weave Progress
+
+**Project**: Emotion Diary App
+**Progress**: 40%
+
+[████████░░░░░░░░░░░░] 2/5
+
+### Phases
+✅ **P1**: Emotion Selection UI (2.5h) [kent-beck, dan-abramov]
+🔄 **P2**: Data Persistence
+⏳ **P3**: History View
+⏳ **P4**: Statistics
+⏳ **P5**: Theme Settings
+
+### Global Knowledge Stats
+- Total troubleshooting records: 47
+- Used in this project: 3
+- Newly recorded: 1
+```
 
 ---
 

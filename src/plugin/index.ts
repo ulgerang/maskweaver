@@ -1,18 +1,18 @@
- /**
- * Maskweaver Plugin for opencode
- * 
- * v0.6.0 - Memory, Context, and Retrospect tools integration
- * 
- * Key features:
- * - Configuration-driven tool activation/deactivation
- * - Auto-activation of default masks
- * - Agent configuration overrides
- * - Event-based lifecycle hooks
- * - Memory and context management tools
- * - Clean plugin architecture
- * 
- * Based on oh-my-opencode plugin development patterns.
- */
+/**
+* Maskweaver Plugin for opencode
+* 
+* v0.6.0 - Memory, Context, and Retrospect tools integration
+* 
+* Key features:
+* - Configuration-driven tool activation/deactivation
+* - Auto-activation of default masks
+* - Agent configuration overrides
+* - Event-based lifecycle hooks
+* - Memory and context management tools
+* - Clean plugin architecture
+* 
+* Based on oh-my-opencode plugin development patterns.
+*/
 
 import { tool, type Plugin } from '@opencode-ai/plugin';
 const z = tool.schema;
@@ -42,6 +42,8 @@ import { createContextTool } from './tools/context.js';
 import { createRetrospectTool } from './tools/retrospect.js';
 import { createMaskSaveTool } from './tools/maskSave.js';
 import { createSquadTool } from './tools/squad.js';
+import { createWeaveTool } from './tools/weave.js';
+import { createSlashcommandTool } from './tools/slashcommand.js';
 
 // ============================================================================
 // Asset Installer
@@ -57,19 +59,19 @@ function getAssetsDir(): string {
   try {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
-    
+
     // 1. If in dist/plugin/ (production) -> ../../assets
     const distAssets = path.join(__dirname, '..', '..', 'assets');
     if (fs.existsSync(distAssets)) {
       return distAssets;
     }
-    
+
     // 2. If in src/plugin/ (development) -> ../../assets
     const srcAssets = path.join(__dirname, '..', '..', 'assets');
     if (fs.existsSync(srcAssets)) {
       return srcAssets;
     }
-    
+
     // 3. Fallback for npm package structure (node_modules/maskweaver/dist/plugin/index.js)
     return distAssets;
   } catch {
@@ -79,17 +81,17 @@ function getAssetsDir(): string {
 
 function copyDirRecursive(src: string, dest: string, result: InstallResult): void {
   if (!fs.existsSync(src)) return;
-  
+
   if (!fs.existsSync(dest)) {
     fs.mkdirSync(dest, { recursive: true });
   }
-  
+
   const entries = fs.readdirSync(src, { withFileTypes: true });
-  
+
   for (const entry of entries) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
-    
+
     if (entry.isDirectory()) {
       copyDirRecursive(srcPath, destPath, result);
     } else {
@@ -114,18 +116,18 @@ function installAssets(projectDir: string): InstallResult {
     skipped: [],
     errors: [],
   };
-  
+
   const assetsDir = getAssetsDir();
   const homeDir = os.homedir();
   const globalConfigDir = path.join(homeDir, '.config', 'opencode');
   const projectOpencodeDir = path.join(projectDir, '.opencode');
-  
+
   // Install to both global and project directories to ensure visibility
   const targetDirs = [projectOpencodeDir];
   if (fs.existsSync(globalConfigDir)) {
     targetDirs.push(globalConfigDir);
   }
-  
+
   for (const targetDir of targetDirs) {
     if (!fs.existsSync(targetDir)) {
       try {
@@ -135,17 +137,17 @@ function installAssets(projectDir: string): InstallResult {
         continue;
       }
     }
-    
+
     // Install agents
     const agentsSrc = path.join(assetsDir, 'agents');
     const agentsDest = path.join(targetDir, 'agents');
     copyDirRecursive(agentsSrc, agentsDest, result);
-    
+
     // Install masks
     const masksSrc = path.join(assetsDir, 'masks');
     const masksDest = path.join(targetDir, 'masks');
     copyDirRecursive(masksSrc, masksDest, result);
-    
+
     // Install commands (if any)
     const commandsSrc = path.join(assetsDir, 'commands');
     const commandsDest = path.join(targetDir, 'commands');
@@ -153,7 +155,7 @@ function installAssets(projectDir: string): InstallResult {
       copyDirRecursive(commandsSrc, commandsDest, result);
     }
   }
-  
+
   return result;
 }
 
@@ -254,24 +256,24 @@ function parseSimpleYaml(content: string): unknown {
   const stack: { indent: number; obj: Record<string, unknown>; key?: string }[] = [
     { indent: -2, obj: result },
   ];
-  
+
   let currentArrayKey: string | undefined = undefined;
   let currentArray: unknown[] = [];
   let multilineKey: string | null = null;
   let multilineValue: string[] = [];
   let multilineIndent = 0;
-  
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trimStart();
-    
+
     if (!trimmed || trimmed.startsWith('#')) {
       if (multilineKey) multilineValue.push('');
       continue;
     }
-    
+
     const indent = line.length - trimmed.length;
-    
+
     if (multilineKey) {
       if (indent > multilineIndent || (indent === multilineIndent && !trimmed.includes(':'))) {
         multilineValue.push(trimmed);
@@ -283,10 +285,10 @@ function parseSimpleYaml(content: string): unknown {
         multilineValue = [];
       }
     }
-    
+
     if (trimmed.startsWith('- ')) {
       const value = trimmed.slice(2).trim();
-      
+
       while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
         const popped = stack.pop()!;
         if (popped.key && currentArrayKey === popped.key) {
@@ -296,25 +298,25 @@ function parseSimpleYaml(content: string): unknown {
           currentArray = [];
         }
       }
-      
+
       if (value.includes(':')) {
         const colonIdx = value.indexOf(':');
         const objKey = value.slice(0, colonIdx).trim();
         const objVal = value.slice(colonIdx + 1).trim();
         const arrayItem: Record<string, unknown> = {};
-        
+
         if (objVal) arrayItem[objKey] = parseValue(objVal);
-        
+
         let j = i + 1;
         const itemIndent = indent + 2;
         while (j < lines.length) {
           const nextLine = lines[j];
           const nextTrimmed = nextLine.trimStart();
           const nextIndent = nextLine.length - nextTrimmed.length;
-          
+
           if (!nextTrimmed || nextTrimmed.startsWith('#')) { j++; continue; }
           if (nextIndent < itemIndent || nextTrimmed.startsWith('- ')) break;
-          
+
           if (nextTrimmed.includes(':')) {
             const nColonIdx = nextTrimmed.indexOf(':');
             const nKey = nextTrimmed.slice(0, nColonIdx).trim();
@@ -323,13 +325,13 @@ function parseSimpleYaml(content: string): unknown {
           }
           j++;
         }
-        
+
         i = j - 1;
         currentArray.push(arrayItem);
       } else {
         currentArray.push(parseValue(value));
       }
-      
+
       if (!currentArrayKey) {
         for (let s = stack.length - 1; s >= 0; s--) {
           if (stack[s].key) { currentArrayKey = stack[s].key; break; }
@@ -337,7 +339,7 @@ function parseSimpleYaml(content: string): unknown {
       }
       continue;
     }
-    
+
     if (trimmed.includes(':')) {
       while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
         const popped = stack.pop()!;
@@ -348,20 +350,20 @@ function parseSimpleYaml(content: string): unknown {
           currentArray = [];
         }
       }
-      
+
       if (currentArrayKey) {
         const parent = stack[stack.length - 1];
         parent.obj[currentArrayKey] = currentArray;
         currentArrayKey = undefined;
         currentArray = [];
       }
-      
+
       const colonIdx = trimmed.indexOf(':');
       const key = trimmed.slice(0, colonIdx).trim();
       const value = trimmed.slice(colonIdx + 1).trim();
-      
+
       const parent = stack[stack.length - 1];
-      
+
       if (!value) {
         const nextLine = lines[i + 1];
         if (nextLine && nextLine.trimStart().startsWith('|')) {
@@ -381,17 +383,17 @@ function parseSimpleYaml(content: string): unknown {
       }
     }
   }
-  
+
   if (multilineKey) {
     const parent = stack[stack.length - 1];
     parent.obj[multilineKey] = multilineValue.join('\n').trim();
   }
-  
+
   if (currentArrayKey) {
     const parent = stack[stack.length - 1];
     parent.obj[currentArrayKey] = currentArray;
   }
-  
+
   return result;
 }
 
@@ -417,12 +419,12 @@ class MaskLoader {
   private catalog: MaskCatalog | null = null;
   private cache: Map<string, LoadedMask> = new Map();
   private config: MaskweaverPluginConfig;
-  
+
   constructor(masksDir: string, config: MaskweaverPluginConfig) {
     this.masksDir = masksDir;
     this.config = config;
   }
-  
+
   async loadCatalog(): Promise<MaskCatalog> {
     if (this.catalog) return this.catalog;
     const indexPath = path.join(this.masksDir, 'index.json');
@@ -431,42 +433,42 @@ class MaskLoader {
     this.catalog = JSON.parse(content) as MaskCatalog;
     return this.catalog;
   }
-  
+
   async load(maskId: string): Promise<LoadedMask | null> {
     // Check if mask is disabled in configuration
     if (!isMaskEnabled(this.config, maskId)) {
       return null;
     }
-    
+
     if (this.cache.has(maskId)) return this.cache.get(maskId)!;
-    
+
     const catalog = await this.loadCatalog();
     let entry: MaskCatalogEntry | null = null;
     let categoryId: string | null = null;
-    
+
     for (const [catId, category] of Object.entries(catalog.categories)) {
       const found = category.masks.find(m => m.id === maskId);
       if (found) { entry = found; categoryId = catId; break; }
     }
-    
+
     if (!entry || !categoryId) return null;
-    
+
     const filePath = path.join(this.masksDir, entry.file);
     if (!fs.existsSync(filePath)) throw new Error(`File not found: ${filePath}`);
-    
+
     const content = fs.readFileSync(filePath, 'utf-8');
     const parsed = filePath.endsWith('.yaml') || filePath.endsWith('.yml')
       ? parseSimpleYaml(content) : JSON.parse(content);
-    
+
     const loadedMask: LoadedMask = { ...(parsed as MaskSchema), category: categoryId, filePath };
     this.cache.set(maskId, loadedMask);
     return loadedMask;
   }
-  
+
   async listAll(): Promise<Array<MaskCatalogEntry & { category: string }>> {
     const catalog = await this.loadCatalog();
     const result: Array<MaskCatalogEntry & { category: string }> = [];
-    
+
     for (const [categoryId, category] of Object.entries(catalog.categories)) {
       for (const mask of category.masks) {
         // Filter out disabled masks
@@ -475,10 +477,10 @@ class MaskLoader {
         }
       }
     }
-    
+
     return result;
   }
-  
+
   async listCategories(): Promise<Array<{ id: string; name: string; description: string; count: number }>> {
     const catalog = await this.loadCatalog();
     return Object.entries(catalog.categories).map(([id, cat]) => {
@@ -500,7 +502,7 @@ class MaskLoader {
 
 function buildRichPrompt(mask: MaskSchema): string {
   const parts: string[] = [];
-  
+
   parts.push(`You are ${mask.profile.name}.`);
   parts.push(`${mask.profile.tagline}`);
   parts.push('');
@@ -516,7 +518,7 @@ function buildRichPrompt(mask: MaskSchema): string {
   parts.push('INSTRUCTIONS:');
   parts.push(mask.behavior.systemPrompt.trim());
   parts.push('');
-  
+
   const style = mask.behavior.communicationStyle;
   parts.push('COMMUNICATION STYLE:');
   parts.push(`- Tone: ${style.tone}`);
@@ -525,19 +527,19 @@ function buildRichPrompt(mask: MaskSchema): string {
   parts.push('');
   parts.push('YOUR STRENGTHS:');
   for (const strength of mask.profile.strengths) parts.push(`- ${strength}`);
-  
+
   if (mask.profile.limitations?.length) {
     parts.push('');
     parts.push('ACKNOWLEDGE YOUR LIMITATIONS:');
     for (const limitation of mask.profile.limitations) parts.push(`- ${limitation}`);
   }
-  
+
   if (mask.behavior.signaturePhrases?.length) {
     parts.push('');
     parts.push('PHRASES YOU MIGHT USE:');
     for (const phrase of mask.behavior.signaturePhrases) parts.push(`- "${phrase}"`);
   }
-  
+
   return parts.join('\n');
 }
 
@@ -555,12 +557,12 @@ function createListMasksTool(maskLoader: MaskLoader, activeMask: () => LoadedMas
       try {
         const masks = await maskLoader.listAll();
         const categories = await maskLoader.listCategories();
-        
+
         let filtered = masks;
         if (args.category) {
           filtered = masks.filter(m => m.category === args.category);
         }
-        
+
         const lines: string[] = [];
         lines.push(`Maskweaver v0.6.0 - ${filtered.length} masks available`);
         const active = activeMask();
@@ -575,7 +577,7 @@ function createListMasksTool(maskLoader: MaskLoader, activeMask: () => LoadedMas
         for (const mask of filtered) {
           lines.push(`  - ${mask.id}: ${mask.name} [${mask.category}]`);
         }
-        
+
         return lines.join('\n');
       } catch (e) {
         return `Error: ${e}`;
@@ -597,14 +599,14 @@ function createSelectMaskTool(
     async execute(args: { maskId: string }) {
       try {
         const mask = await maskLoader.load(args.maskId);
-        
+
         if (!mask) {
           const available = await maskLoader.listAll();
           return `Error: Mask "${args.maskId}" not found.\nAvailable: ${available.map(m => m.id).join(', ')}`;
         }
-        
+
         setActiveMask(mask);
-        
+
         return `✓ Mask activated: ${mask.profile.name}
 
 "${mask.profile.tagline}"
@@ -629,7 +631,7 @@ function createDeselectMaskTool(
     async execute() {
       const prev = activeMask();
       setActiveMask(null);
-      
+
       if (prev) {
         return `✓ Mask removed: ${prev.profile.name}\nReturned to default behavior.`;
       }
@@ -650,11 +652,11 @@ function createGetMaskPromptTool(
     async execute(args: { maskId?: string }) {
       const maskId = args.maskId || activeMask()?.metadata.id;
       if (!maskId) return 'Error: No mask specified and no active mask.';
-      
+
       try {
         const mask = await maskLoader.load(maskId);
         if (!mask) return `Error: Mask "${maskId}" not found.`;
-        
+
         return `# ${mask.profile.name}\n\n${buildRichPrompt(mask)}`;
       } catch (e) {
         return `Error: ${e}`;
@@ -674,7 +676,7 @@ function createMaskweaverStatusTool(
     async execute() {
       let masksCount = 0;
       let categoriesCount = 0;
-      
+
       if (maskLoader) {
         try {
           const masks = await maskLoader.listAll();
@@ -683,7 +685,7 @@ function createMaskweaverStatusTool(
           categoriesCount = categories.length;
         } catch (_e) { /* ignore */ }
       }
-      
+
       const active = activeMask();
       return `Maskweaver v0.6.0
 Masks directory: ${masksDir}
@@ -732,7 +734,7 @@ function parseAgentMarkdown(content: string): AgentDefinition {
   if (parts.length < 3) {
     return { prompt: content.trim() };
   }
-  
+
   try {
     const frontmatter = parseYaml(parts[1]);
     const prompt = parts.slice(2).join('---').trim();
@@ -742,34 +744,78 @@ function parseAgentMarkdown(content: string): AgentDefinition {
   }
 }
 
-function loadAgentAssets(assetsDir: string): Record<string, AgentDefinition> {
-  const agentsDir = path.join(assetsDir, 'agents');
-  const agents: Record<string, AgentDefinition> = {};
-  
-  if (!fs.existsSync(agentsDir)) return agents;
-  
-  try {
-    const files = fs.readdirSync(agentsDir);
-    for (const file of files) {
-      if (file.endsWith('.md') && file !== 'dummy-template.md') {
-        const agentId = path.basename(file, '.md');
-        const content = fs.readFileSync(path.join(agentsDir, file), 'utf-8');
-        agents[agentId] = parseAgentMarkdown(content);
+// ============================================================================
+// Default Embedded Agents (ensures first-run works without restart)
+// ============================================================================
+
+const DEFAULT_AGENTS: Record<string, AgentDefinition> = {
+  'dummy-human': {
+    description: 'Dummy-Human - Pure execution agent that performs tasks with masks assigned by Mask Weaver',
+    mode: 'subagent',
+    temperature: 0.2,
+    permission: {
+      edit: 'allow',
+      bash: 'allow',
+      webfetch: 'allow',
+    },
+    prompt: `# Dummy-Human
+
+You are a **Dummy-Human**.
+
+## Identity
+
+You are a pure execution agent. You accurately perform work instructions received from the Mask Weaver.
+
+## Behavior Principles
+
+1. If the Mask Weaver provides a **mask (persona)**, become that expert and work accordingly
+2. If no mask is provided, work as a competent software engineer
+3. Complete assigned tasks accurately
+4. Report results clearly
+
+## Result Reporting
+
+When work is complete:
+- Summary of work performed
+- Generated outputs
+- Additional considerations (if any)`,
+  },
+};
+
+function loadAgentAssets(...assetsDirs: string[]): Record<string, AgentDefinition> {
+  // Start with default embedded agents (always available)
+  const agents: Record<string, AgentDefinition> = { ...DEFAULT_AGENTS };
+
+  // Load from each directory in order (later directories override earlier ones)
+  for (const assetsDir of assetsDirs) {
+    const agentsDir = path.join(assetsDir, 'agents');
+
+    if (!fs.existsSync(agentsDir)) continue;
+
+    try {
+      const files = fs.readdirSync(agentsDir);
+      for (const file of files) {
+        if (file.endsWith('.md') && file !== 'dummy-template.md') {
+          const agentId = path.basename(file, '.md');
+          const content = fs.readFileSync(path.join(agentsDir, file), 'utf-8');
+          agents[agentId] = parseAgentMarkdown(content);
+        }
       }
+    } catch (e) {
+      // Ignore errors - default agents still available
     }
-  } catch (e) {
-    // Ignore errors
   }
-  
+
   return agents;
 }
+
 
 export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
   // ==========================================================================
   // 1. Load Configuration (oh-my-opencode pattern)
   // ==========================================================================
   const pluginConfig = loadPluginConfig(directory, { client, verbose: false });
-  
+
   // Validate configuration
   const configErrors = validateConfig(pluginConfig);
   if (configErrors.length > 0) {
@@ -779,22 +825,31 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
       message: `Configuration validation errors: ${configErrors.join(', ')}`,
     });
   }
-  
+
   const verbose = isVerboseLoggingEnabled(pluginConfig);
-  
+
   // ==========================================================================
   // 2. Auto-install assets on first run
   // ==========================================================================
   const installResult = installAssets(directory);
-  
-  if (installResult.installed.length > 0) {
+
+  // Track if this is a first-time installation
+  const isFirstInstall = installResult.installed.length > 0;
+
+  if (isFirstInstall) {
     client.app.log({
       service: 'maskweaver',
       level: 'info',
       message: `Installed ${installResult.installed.length} files to .opencode/ (agents, masks)`,
     });
+    // Show prominent restart message for first-time installation
+    client.app.log({
+      service: 'maskweaver',
+      level: 'warn',
+      message: `⚠️ RESTART REQUIRED: Please restart OpenCode to activate all Maskweaver features (agents, masks, commands).`,
+    });
   }
-  
+
   if (installResult.errors.length > 0) {
     client.app.log({
       service: 'maskweaver',
@@ -802,31 +857,31 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
       message: `Asset errors: ${installResult.errors.join(', ')}`,
     });
   }
-  
+
   // ==========================================================================
   // 3. Initialize masks
   // ==========================================================================
   const homeDir = os.homedir();
   const globalMasksDir = path.join(homeDir, '.config', 'opencode', 'masks');
   const projectMasksDir = path.join(directory, '.opencode', 'masks');
-  
+
   // Priority: project masks > global masks
   const masksDir = fs.existsSync(projectMasksDir) ? projectMasksDir : globalMasksDir;
-  
+
   state = {
     maskLoader: null,
     activeMask: null,
     masksDir,
     config: pluginConfig,
   };
-  
+
   // Log plugin loaded
   client.app.log({
     service: 'maskweaver',
     level: 'info',
     message: `Maskweaver plugin loaded v0.6.0 (oh-my-opencode pattern)`,
   });
-  
+
   if (fs.existsSync(masksDir)) {
     state.maskLoader = new MaskLoader(masksDir, pluginConfig);
     try {
@@ -847,13 +902,13 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
       state.maskLoader = null;
     }
   }
-  
+
   // ==========================================================================
   // 4. Auto-activate default mask (oh-my-opencode pattern)
   // ==========================================================================
   const defaultMaskId = getDefaultMask(pluginConfig);
   const autoActivate = isAutoActivateEnabled(pluginConfig);
-  
+
   if (defaultMaskId && autoActivate && state.maskLoader) {
     try {
       const defaultMask = await state.maskLoader.load(defaultMaskId);
@@ -879,7 +934,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
       });
     }
   }
-  
+
   // ==========================================================================
   // 5. Helper functions for tool factories
   // ==========================================================================
@@ -887,58 +942,58 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
   const setActiveMask = (mask: LoadedMask | null) => {
     if (state) state.activeMask = mask;
   };
-  
+
   // ==========================================================================
   // 6. Conditional tool registration (oh-my-opencode pattern)
   // ==========================================================================
   const isToolActive = (toolName: string) => isToolEnabled(pluginConfig, toolName);
-  
+
   // Helper to ensure tool arguments are compatible with opencode's expected format.
   // opencode expects a ZodRawShape (raw object), NOT a ZodObject instance.
   const wrapSchema = (schema: any): any => {
     if (!schema || typeof schema !== 'object') return schema;
-    
+
     // If it's a ZodObject (Zod 4), extract its shape
     if (schema.def && typeof schema.def === 'object' && schema.type === 'object') {
       return schema.def.shape;
     }
-    
+
     // If it's a ZodObject (Zod 3), extract its shape
     if (schema._def && typeof schema._def.shape === 'function') {
       return schema._def.shape();
     }
-    
+
     return schema;
   };
 
   const tools: Record<string, any> = {};
-  
+
   if (state.maskLoader) {
     if (isToolActive('list_masks')) {
       const tool = createListMasksTool(state.maskLoader, getActiveMask);
       tool.args = wrapSchema(tool.args);
       tools.list_masks = tool;
     }
-    
+
     if (isToolActive('select_mask')) {
       const tool = createSelectMaskTool(state.maskLoader, getActiveMask, setActiveMask);
       tool.args = wrapSchema(tool.args);
       tools.select_mask = tool;
     }
-    
+
     if (isToolActive('deselect_mask')) {
       const tool = createDeselectMaskTool(getActiveMask, setActiveMask);
       tool.args = wrapSchema(tool.args);
       tools.deselect_mask = tool;
     }
-    
+
     if (isToolActive('get_mask_prompt')) {
       const tool = createGetMaskPromptTool(state.maskLoader, getActiveMask);
       tool.args = wrapSchema(tool.args);
       tools.get_mask_prompt = tool;
     }
   }
-  
+
   if (isToolActive('maskweaver_status')) {
     const tool = createMaskweaverStatusTool(state.maskLoader, masksDir, getActiveMask);
     tool.args = wrapSchema(tool.args);
@@ -1021,13 +1076,35 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
       execute: (args: any) => squadTool.execute(args, { worktree: directory }),
     };
   }
-  
+
+  // Weave tool (phase-driven development workflow)
+  if (isToolActive('weave')) {
+    const weaveTool = createWeaveTool();
+    tools.weave = {
+      description: weaveTool.description,
+      args: wrapSchema(weaveTool.args),
+      execute: (args: any) => weaveTool.execute(args, { worktree: directory }),
+    };
+  }
+
+  // Slashcommand tool (handles /weave etc. on first run without restart)
+  if (isToolActive('slashcommand')) {
+    const slashcommandTool = createSlashcommandTool();
+    tools.slashcommand = {
+      description: slashcommandTool.description,
+      args: wrapSchema(slashcommandTool.args),
+      execute: (args: any) => slashcommandTool.execute(args, { worktree: directory }),
+    };
+  }
+
   // ==========================================================================
   // 8. Load and register agents
   // ==========================================================================
   const assetsDir = getAssetsDir();
-  const loadedAgents = loadAgentAssets(assetsDir);
-  
+  const projectOpencodeDir = path.join(directory, '.opencode');
+  // Load from package assets first, then project .opencode (project overrides package)
+  const loadedAgents = loadAgentAssets(assetsDir, projectOpencodeDir);
+
   // Add variants for dummy-human
   if (loadedAgents['dummy-human']) {
     if (!loadedAgents['dummy-flash']) {
@@ -1070,14 +1147,14 @@ You are currently embodying the "${state.activeMask.profile.name}" persona.
 
 ${buildRichPrompt(state.activeMask)}
 </ACTIVE_PERSONA>`;
-        
+
         (output.system ||= []).push(maskPrompt);
       }
     },
-    
+
     // Conditional tools
     tool: tools,
-    
+
     // Event hooks (oh-my-opencode pattern)
     event: async ({ event }) => {
       // Session created - log available masks
@@ -1096,13 +1173,13 @@ ${buildRichPrompt(state.activeMask)}
           }
         }
       }
-      
+
       // Session deleted - cleanup
       if (event.type === 'session.deleted') {
         if (state && verbose) {
           const wasActive = state.activeMask !== null;
           state.activeMask = null;
-          
+
           if (wasActive) {
             client.app.log({
               service: 'maskweaver',
@@ -1113,7 +1190,7 @@ ${buildRichPrompt(state.activeMask)}
         }
       }
     },
-    
+
     // Config hook - (oh-my-opencode pattern)
     config: async (config: any) => {
       // NOTE: Current opencode version expects config to be a function, not an object.

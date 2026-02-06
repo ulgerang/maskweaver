@@ -65,6 +65,12 @@
       "import": "./dist/lib.js",
       "default": "./dist/lib.js",
       "types": "./dist/lib.d.ts"
+    },
+    "./weave": {
+      "import": "./dist/weave/index.js",
+      "require": "./dist/weave/index.js",
+      "default": "./dist/weave/index.js",
+      "types": "./dist/weave/index.d.ts"
     }
   },
   "scripts": {

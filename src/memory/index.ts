@@ -62,6 +62,7 @@ export {
   MemoryDatabase,
   initDatabase,
   getDatabase,
+  tryGetDatabase,
   upsertChunk,
   searchByVector,
   searchByText,

@@ -808,7 +808,9 @@ Only AFTER completing all configuration, tell the user:
 >
 > 재시작 후 다음 명령어로 확인할 수 있어요:
 > - `안녕하세요` - AI 도우미 테스트
-> - 가면을 써달라고 하면 전문가 모드로 답변합니다"
+> - 가면을 써달라고 하면 전문가 모드로 답변합니다
+> - `/weave help` - Weave 워크플로우 도움말
+> - `/weave design docs/` - Phase 기반 개발 시작"
 
 ### Important Notes for LLM Agents
 
@@ -820,10 +822,36 @@ Only AFTER completing all configuration, tell the user:
 
 ---
 
+## Weave Workflow (New!)
+
+After installation, try the **Weave workflow** - a phase-driven development system with AI self-verification:
+
+```bash
+# 1. Analyze requirements and create a phase plan
+/weave design docs/
+
+# 2. Execute a phase with auto-verification
+/weave craft P1
+
+# 3. Check progress anytime
+/weave status
+```
+
+**Features:**
+- 🎭 **Auto Mask Selection**: AI picks the best expert for each task
+- ✅ **Multi-Layer Verification**: Build → Test → E2E → Visual → A11y
+- 🧠 **Global Knowledge**: Cross-project troubleshooting solutions (RAG)
+- 📊 **Progress Tracking**: Real-time phase and task status
+
+See the [README](../README.md#-weave-workflow-zdd-40) for full documentation.
+
+---
+
 ## Next Steps
 
 - 📖 [Configuration Guide](configuration.md) - Advanced options
 - 🎭 [Masks Guide](masks.md) - Creating custom personas
+- 🧵 [Weave Workflow](../README.md#-weave-workflow-zdd-40) - Phase-driven development
 - 🚀 [Quick Start](../README.md#quick-start) - Usage examples
 
 ---

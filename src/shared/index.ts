@@ -39,3 +39,20 @@ export type {
 } from "./config.js";
 
 export { DEFAULT_CONFIG } from "./config.js";
+
+// Image normalization (LLM Vision API compatibility)
+export type {
+  ImageNormalizeOptions,
+  NormalizedImage,
+  ImageInfo,
+} from "./image.js";
+
+export {
+  normalizeImage,
+  normalizeImageToFile,
+  getImageInfo,
+  isSupported,
+  needsConversion,
+  isLLMCompatible,
+  createImageDataUrl,
+} from "./image.js";

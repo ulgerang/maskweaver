@@ -24,6 +24,7 @@
 - **전문가 페르소나 (Masks)**: 전설적인 개발자들의 철학을 담은 표준 YAML 프로필.
 - **스마트 위임**: OpenCode에 최적화된 멀티 에이전트 워크플로우.
 - **프로젝트 메모리**: 코드베이스 전체에 대한 하이브리드 의미론적 검색.
+- **🆕 Weave 워크플로우**: AI 자체 검증이 포함된 Phase 기반 개발.
 
 ---
 
@@ -129,10 +130,79 @@ profile:
 비용 효율적인 멀티 에이전트 워크플로우를 위한 스마트 서브에이전트:
 
 | 에이전트 | 모델 등급 | 비용 | 최적 용도 |
-|---------|----------|------|-----------| 
+|---------|----------|------|-----------|
 | `@dummy-flash` | 빠름 | 💰 | 파일 검색, 요약, 간단한 작업 |
 | `@dummy-human` | 균형 | 💰💰 | 코드 작성, 리뷰, 일반 작업 |
 | `@dummy-premium` | 강력 | 💰💰💰 | 아키텍처, 복잡한 디버깅 |
+
+### 🧵 Weave 워크플로우 (ZDD 4.0)
+
+**Phase 기반 개발** — "AI가 검증하고, 유저가 확인한다"
+
+Weave는 **무결함 개발 4.0 (Zero-Defect Development)**을 구현한 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가능한 Phase로 나누고, 전문가 마스크를 자동 선택하며, 유저에게 전달하기 전에 자체 검증 루프를 실행합니다.
+
+#### 명령어
+
+| 명령어 | 설명 |
+|--------|------|
+| `/weave design [docs]` | 요구사항 분석 → Phase 계획 생성 |
+| `/weave craft [phase]` | 자동 검증 루프로 Phase 실행 |
+| `/weave status` | 프로젝트 진행 상황 및 통계 확인 |
+| `/weave help` | 도움말 표시 |
+
+#### 워크플로우
+
+```
+1. DESIGN: 문서 분석 → Phase 계획
+       ↓
+2. CRAFT: 각 Phase에 대해:
+   ├── 마스크 자동 선택 🎭
+   ├── 테스트 먼저 (Red)
+   ├── 구현 (Green)
+   ├── 리팩토링
+   └── 자체 검증 루프 ✅
+       ├── PASS → 다음 작업
+       └── FAIL → 글로벌 지식 검색 → 재시도 (최대 5회)
+       ↓
+3. HANDOFF: 모든 테스트 통과 → 유저가 느낌과 의도 검증
+```
+
+#### 다층 AI 검증 시스템
+
+유저에게 전달하기 전, AI가 다음 검증 레이어를 실행합니다:
+
+| 레이어 | 유형 | 도구 |
+|--------|------|------|
+| 1️⃣ TypeCheck | 빌드 | `tsc --noEmit` |
+| 2️⃣ Lint | 빌드 | `eslint` |
+| 3️⃣ Build | 빌드 | `npm run build` |
+| 4️⃣ Unit Tests | 테스트 | `jest` / `vitest` |
+| 5️⃣ E2E Tests | 테스트 | **Playwright** |
+| 6️⃣ Screenshot | 시각 | Playwright / 브라우저 캡처 |
+| 7️⃣ API Check | API | `fetch` 헬스 체크 |
+| 8️⃣ A11y | 접근성 | `axe-core` |
+
+#### 마스크 자동 선택
+
+AI가 각 작업에 가장 적합한 전문가를 자동으로 선택합니다:
+
+| 작업 유형 | 자동 선택 마스크 |
+|----------|-----------------|
+| 아키텍처/설계 | 🏗️ 마틴 파울러 |
+| 테스트/TDD | 🧪 켄트 벡 |
+| React/프론트엔드 | ⚛️ 댄 아브라모프 |
+| 성능/시스템 | 🐧 린 토발즈 |
+| ML/AI | 🧠 앤드류 응 |
+
+#### 글로벌 지식 베이스 (프로젝트 간 RAG)
+
+트러블슈팅 솔루션이 전역으로 저장되어 모든 프로젝트에서 공유됩니다:
+
+```
+에러 발생 → ~/.maskweaver/knowledge.sqlite 검색
+    ├── 발견 → 솔루션 적용 → 재시도
+    └── 미발견 → 직접 해결 → 향후를 위해 솔루션 기록
+```
 
 ### 🧠 메모리 시스템
 
@@ -207,12 +277,13 @@ Maskweaver는 모듈식 exports를 가진 단일 npm 패키지입니다:
 import maskweaver from 'maskweaver';
 
 // Named exports - 모듈 네임스페이스
-import { core, memory, context, retrospect, verify } from 'maskweaver';
+import { core, memory, context, retrospect, verify, weave } from 'maskweaver';
 
 // 서브경로 imports - 직접 모듈 접근
 import { hybridSearch } from 'maskweaver/memory';
 import { createFeature } from 'maskweaver/context';
 import { MaskLoader } from 'maskweaver/core';
+import { WeaveOrchestrator, GlobalKnowledge } from 'maskweaver/weave';
 ```
 
 **모듈:**
@@ -221,7 +292,138 @@ import { MaskLoader } from 'maskweaver/core';
 - `maskweaver/context` - 기능 기반 작업 추적
 - `maskweaver/verify` - 교차 가면 코드 리뷰
 - `maskweaver/retrospect` - 세션 효과 분석
+- `maskweaver/weave` - Phase 기반 개발 워크플로우
 - `maskweaver/plugin` - OpenCode 플러그인 엔트리 포인트
+
+---
+
+## 🧵 Weave 사용 가이드
+
+### 1단계: 설계 (Design)
+
+요구사항 분석으로 시작합니다:
+
+```bash
+/weave design docs/
+# 또는
+/weave design wiki/requirements.md
+```
+
+AI가 수행하는 작업:
+1. 경로 내 모든 문서 읽기
+2. 유사한 과거 프로젝트를 메모리에서 검색
+3. 필요시 명확화 질문
+4. 승인을 위한 **Phase 계획서** 제시
+
+출력 예시:
+```markdown
+## 📋 실행 계획서
+
+### 비전
+AI 인사이트가 포함된 현대적 감정 일기 앱 구축
+
+### Phase 계획
+| Phase | 이름 | 완료 조건 | 예상 시간 |
+|-------|------|----------|----------|
+| P1 | 감정 선택 UI | 유저가 감정을 선택할 수 있음 | 2-3시간 |
+| P2 | 데이터 저장 | 감정이 스토리지에 저장됨 | 2-3시간 |
+| P3 | 히스토리 뷰 | 유저가 과거 기록을 볼 수 있음 | 2-3시간 |
+
+이 계획이 괜찮으세요? 변경이 필요하면 말씀해주세요.
+```
+
+### 2단계: 승인 & 실행
+
+승인 후 실행 시작:
+
+```bash
+/weave craft P1
+```
+
+AI가 수행하는 작업:
+1. 각 작업에 최적의 마스크 선택 (예: 테스트는 켄트 벡)
+2. 테스트 먼저 작성 (Red)
+3. 최소 코드 구현 (Green)
+4. 품질을 위한 리팩토링
+5. 다층 검증 실행
+6. 실패 시: 글로벌 지식 검색 → 최대 5회 재시도
+7. 검증을 위해 유저에게 전달
+
+진행 상황 출력:
+```markdown
+### Task 진행 상황
+
+#### Task 1: EmotionButton 컴포넌트
+- [x] 마스크: 🧪 켄트 벡
+- [x] 테스트 작성
+- [x] 구현
+- [x] 검증 완료 ✅
+
+#### Task 2: 상태 관리
+- [x] 마스크: ⚛️ 댄 아브라모프
+- [x] 테스트 작성
+- [x] 구현
+- [ ] 검증 중 🔄 (재시도 2/5)
+  - 💡 유사 솔루션 발견: "React 상태 타이밍 이슈"
+  - 수정: useEffect 의존성 배열 추가
+```
+
+### 3단계: 핸드오프 & 검증
+
+모든 검증이 통과되면:
+
+```markdown
+## ✅ Phase P1 검증 완료!
+
+### 🤖 AI 테스트 결과
+| 테스트 | 결과 |
+|--------|------|
+| Build | ✅ 성공 |
+| Unit Tests | ✅ 15/15 |
+| Lint | ✅ 통과 |
+
+### 🎭 사용된 마스크
+- 켄트 벡 (테스트)
+- 댄 아브라모프 (React 컴포넌트)
+
+### 🔗 접속
+http://localhost:5173
+
+### 👤 사람만 판단 가능한 것
+- [ ] 느낌이 의도대로인가요?
+- [ ] 사용성이 좋은가요?
+- [ ] 원하던 기능이 맞나요?
+
+**[승인]** **[변경 요청]** **[나중에]**
+```
+
+### 4단계: 언제든지 상태 확인
+
+```bash
+/weave status
+```
+
+출력:
+```markdown
+## 📊 Weave 진행 상황
+
+**프로젝트**: 감정 일기 앱
+**진행률**: 40%
+
+[████████░░░░░░░░░░░░] 2/5
+
+### Phases
+✅ **P1**: 감정 선택 UI (2.5h) [kent-beck, dan-abramov]
+🔄 **P2**: 데이터 저장
+⏳ **P3**: 히스토리 뷰
+⏳ **P4**: 통계
+⏳ **P5**: 테마 설정
+
+### 글로벌 지식 통계
+- 총 트러블슈팅 기록: 47개
+- 이 프로젝트에서 활용: 3개
+- 새로 기록됨: 1개
+```
 
 ---
 

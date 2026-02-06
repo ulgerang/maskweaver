@@ -39,7 +39,7 @@ async function loadDatabase(): Promise<any> {
     isBun = true;
     return DatabaseConstructor;
   }
-  
+
   // In Node.js environment, use better-sqlite3
   // Use Function constructor to avoid Bun's static analysis of import()
   try {
@@ -110,7 +110,7 @@ export class MemoryDatabase {
    */
   static async create(dbPath: string): Promise<MemoryDatabase> {
     const DatabaseClass = await loadDatabase();
-    
+
     // Ensure directory exists
     const dir = dirname(dbPath);
     if (!existsSync(dir)) {
@@ -133,13 +133,13 @@ export class MemoryDatabase {
 
 
     const instance = new MemoryDatabase(db);
-    
+
     // Initialize schema
     instance.initSchema();
-    
+
     // Prepare statements
     instance.prepareStatements();
-    
+
     return instance;
   }
 
@@ -323,7 +323,7 @@ export class MemoryDatabase {
    */
   upsertChunks(chunks: Array<{ chunk: Chunk; embedding: number[] }>): number[] {
     const ids: number[] = [];
-    
+
     const transaction = this.db.transaction(() => {
       for (const { chunk, embedding } of chunks) {
         const id = this.upsertChunk(chunk, embedding);
@@ -437,7 +437,7 @@ export class MemoryDatabase {
 
       return ftsResults.map(fts => {
         const chunk = chunkStmt.get(fts.rowid) as ChunkRow;
-        
+
         // Normalize BM25 score to 0-1 range
         const normalizedScore = Math.min(1, Math.max(0, -fts.rank / 10));
 
@@ -528,7 +528,7 @@ export class MemoryDatabase {
       pageCount = (this.db.pragma('page_count', { simple: true }) as number);
       pageSize = (this.db.pragma('page_size', { simple: true }) as number);
     }
-    
+
     const dbSize = pageCount * pageSize;
 
     return { chunkCount, embeddingCount, maskUsageCount, dbSize };
@@ -568,6 +568,14 @@ export function getDatabase(): MemoryDatabase {
   if (!defaultInstance) {
     throw new Error('[Memory DB] Database not initialized. Call initDatabase() first.');
   }
+  return defaultInstance;
+}
+
+/**
+ * Try to get the database instance, returning null if not initialized.
+ * Use this when database access is optional (e.g., in intake stage).
+ */
+export function tryGetDatabase(): MemoryDatabase | null {
   return defaultInstance;
 }
 

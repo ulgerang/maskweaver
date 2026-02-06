@@ -271,10 +271,10 @@ async function searchSimilarProjects(
         // Build query from features and tech stack
         const query = [...features.slice(0, 5), ...techStack].join(' ');
 
-        // Get database instance (synchronous)
-        const db = memoryModule.getDatabase();
+        // Get database instance (returns null if not initialized)
+        const db = memoryModule.tryGetDatabase();
         if (!db) {
-            console.log('[Intake] Memory database not available');
+            console.log('[Intake] Memory database not initialized, skipping similar project search');
             return results;
         }
 

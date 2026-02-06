@@ -397,6 +397,176 @@ verify: {
 
 ---
 
+## Weave Workflow
+
+Configure the phase-driven development workflow:
+
+```typescript
+weave: {
+  // Enable/disable Weave workflow
+  enabled: true,
+  
+  // Verification layers to run
+  verification: {
+    layers: [
+      'typecheck',   // tsc --noEmit
+      'lint',        // eslint
+      'build',       // npm run build
+      'test',        // jest/vitest
+      'e2e',         // Playwright (primary E2E tool)
+      'visual',      // Screenshot capture
+      'api',         // API health checks
+      'a11y'         // axe-core accessibility
+    ],
+    
+    // Maximum retry attempts before escalating to user
+    maxRetries: 5,
+    
+    // Playwright configuration
+    playwright: {
+      headless: true,
+      browser: 'chromium',  // chromium | firefox | webkit
+      timeout: 30000,
+      screenshotsDir: './.weave/screenshots'
+    }
+  },
+  
+  // Autonomous mask selection
+  maskSelection: {
+    enabled: true,
+    rules: {
+      'architecture': 'martin-fowler',
+      'testing': 'kent-beck',
+      'react': 'dan-abramov',
+      'performance': 'linus-torvalds',
+      'ml': 'andrew-ng'
+    },
+    
+    // Rotate mask if same error occurs
+    rotateMaskOnFailure: true
+  },
+  
+  // Global Knowledge Base (RAG)
+  globalKnowledge: {
+    enabled: true,
+    
+    // Storage location
+    dbPath: '~/.maskweaver/knowledge.sqlite',
+    
+    // Search configuration
+    search: {
+      minScore: 0.7,
+      limit: 5
+    },
+    
+    // Auto-record successful fixes
+    autoRecord: true
+  },
+  
+  // Plan storage
+  planDir: './.opencode/weave',
+  
+  // Phase completion settings
+  handoff: {
+    // Require all verification layers to pass
+    requireAllPassing: true,
+    
+    // Show human validation checklist
+    showValidationChecklist: true
+  }
+}
+```
+
+### Verification Layers
+
+| Layer | Type | Tool | Purpose |
+|-------|------|------|---------|
+| `typecheck` | Build | `tsc --noEmit` | TypeScript type checking |
+| `lint` | Build | `eslint` | Code quality |
+| `build` | Build | `npm run build` | Build verification |
+| `test` | Test | `jest/vitest` | Unit tests |
+| `e2e` | Test | **Playwright** | End-to-end tests |
+| `visual` | Visual | Playwright/browser | Screenshot capture |
+| `api` | API | `fetch` | API health checks |
+| `a11y` | Accessibility | `axe-core` | Accessibility audits |
+
+### Global Knowledge Base
+
+The Global Knowledge Base stores troubleshooting solutions across all projects:
+
+```typescript
+globalKnowledge: {
+  // Location (shared across projects)
+  dbPath: '~/.maskweaver/knowledge.sqlite',
+  
+  // Custom error signature extraction
+  errorSigPatterns: [
+    'TS\\d+',           // TypeScript errors
+    'ENOENT',           // File not found
+    'playwright:.*'     // Playwright errors
+  ],
+  
+  // Enable hybrid search (vector + text)
+  hybridSearch: true
+}
+```
+
+### Playwright Integration
+
+Playwright is the default E2E testing tool for Weave:
+
+```typescript
+weave: {
+  verification: {
+    playwright: {
+      // Browser settings
+      headless: true,
+      browser: 'chromium',
+      
+      // Timeouts
+      timeout: 30000,
+      navigationTimeout: 10000,
+      
+      // Screenshots
+      screenshotsDir: './.weave/screenshots',
+      fullPage: true,
+      
+      // Trace recording (for debugging)
+      trace: 'retain-on-failure'
+    }
+  }
+}
+```
+
+### Mask Auto-Selection Rules
+
+Configure which masks are automatically selected for different task types:
+
+```typescript
+weave: {
+  maskSelection: {
+    rules: {
+      // Task patterns mapped to masks
+      'architect': 'martin-fowler',
+      'design': 'martin-fowler',
+      'test': 'kent-beck',
+      'tdd': 'kent-beck',
+      'react': 'dan-abramov',
+      'frontend': 'dan-abramov',
+      'performance': 'linus-torvalds',
+      'system': 'linus-torvalds',
+      'ml': 'andrew-ng',
+      'ai': 'andrew-ng'
+    },
+    
+    // Default mask if no pattern matches
+    default: 'kent-beck'
+  }
+}
+```
+
+---
+
 ## Language Configuration
 
 Multi-language support:
@@ -627,6 +797,7 @@ export VOYAGEAI_API_KEY=...
 ## Next Steps
 
 - 📖 [Masks Guide](masks.md) - Learn about creating expert personas
+- 🧵 [Weave Workflow](../README.md#-weave-workflow-zdd-40) - Phase-driven development with AI verification
 - 🚀 [Installation Guide](installation.md) - Get started with Maskweaver
 - 💬 [Ask questions](https://github.com/ulgerang/maskweaver/discussions)
 

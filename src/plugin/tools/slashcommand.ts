@@ -250,17 +250,29 @@ Use command="list" to see all available commands.`,
                     lines.push(`- **/${cmd.name}**: ${desc} (${cmd.scope})`);
                 }
                 lines.push(`\n**Total**: ${commands.length} commands`);
-                return { message: lines.join('\n') };
+                return lines.join('\n');
             }
 
             // Normalize command name (remove leading /)
-            const cmdName = args.command.replace(/^\//, '').toLowerCase();
+            let cmdName = args.command.replace(/^\//, '').toLowerCase();
 
-            // Handle "weave" shortcut (redirect to weave-help)
-            if (cmdName === 'weave') {
+            // Handle "weave" command with optional subcommand
+            // e.g., "weave status" -> "weave-status"
+            // e.g., "status" (alone) -> might mean "weave-status"
+            if (cmdName.startsWith('weave ')) {
+                // "weave design" -> "weave-design"
+                cmdName = cmdName.replace(' ', '-');
+            } else if (cmdName === 'weave') {
+                // Just "weave" -> "weave-help"
                 const helpCmd = commands.find(c => c.name === 'weave-help');
                 if (helpCmd) {
-                    return { message: helpCmd.content };
+                    return helpCmd.content || 'Weave help content not available.';
+                }
+            } else if (['status', 'design', 'craft', 'help'].includes(cmdName)) {
+                // Shorthand: "status" -> "weave-status"
+                const weaveCmd = commands.find(c => c.name === `weave-${cmdName}`);
+                if (weaveCmd) {
+                    return weaveCmd.content || `weave-${cmdName} content not available.`;
                 }
             }
 
@@ -270,10 +282,7 @@ Use command="list" to see all available commands.`,
             );
 
             if (exactMatch) {
-                return {
-                    message: exactMatch.content,
-                    metadata: exactMatch.metadata,
-                };
+                return exactMatch.content || `/${exactMatch.name} has no content.`;
             }
 
             // Find partial matches
@@ -283,17 +292,12 @@ Use command="list" to see all available commands.`,
 
             if (partialMatches.length > 0) {
                 const matchList = partialMatches.map(c => `/${c.name}`).join(', ');
-                return {
-                    error: `No exact match for "/${cmdName}". Did you mean: ${matchList}?`,
-                    suggestions: partialMatches.map(c => c.name),
-                };
+                return `No exact match for "/${cmdName}". Did you mean: ${matchList}?`;
             }
 
             // No match found
             const available = commands.slice(0, 10).map(c => `/${c.name}`).join(', ');
-            return {
-                error: `Command "/${cmdName}" not found. Available: ${available}...`,
-            };
+            return `Command "/${cmdName}" not found. Available: ${available}...`;
         },
     };
 }

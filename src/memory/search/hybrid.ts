@@ -31,6 +31,11 @@ export function hybridSearch(
 
   const db = getDatabase();
 
+  // SQLite not available - return empty results (graceful degradation)
+  if (!db) {
+    return [];
+  }
+
   // Get more candidates for reranking
   const candidateLimit = limit * 3;
 

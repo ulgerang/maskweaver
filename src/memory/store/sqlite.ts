@@ -23,21 +23,48 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let DatabaseConstructor: any = null;
 let isBun = false;
+let sqliteUnavailable = false;
+let sqliteUnavailableReason = '';
 
 // Check if running in Bun at module level
 // @ts-ignore
 const IS_BUN = typeof Bun !== 'undefined';
 
+/**
+ * Check if SQLite is available without throwing.
+ * Returns true if SQLite can be loaded, false otherwise.
+ */
+export function isSqliteAvailable(): boolean {
+  return !sqliteUnavailable;
+}
+
+/**
+ * Get the reason SQLite is unavailable.
+ */
+export function getSqliteUnavailableReason(): string {
+  return sqliteUnavailableReason;
+}
+
 async function loadDatabase(): Promise<any> {
   if (DatabaseConstructor) return DatabaseConstructor;
 
+  // If we already know SQLite is unavailable, return null immediately
+  if (sqliteUnavailable) return null;
+
   // In Bun environment, use bun:sqlite exclusively
   if (IS_BUN) {
-    // @ts-ignore
-    const { Database } = await import('bun:sqlite');
-    DatabaseConstructor = Database;
-    isBun = true;
-    return DatabaseConstructor;
+    try {
+      // @ts-ignore
+      const { Database } = await import('bun:sqlite');
+      DatabaseConstructor = Database;
+      isBun = true;
+      return DatabaseConstructor;
+    } catch (error) {
+      sqliteUnavailable = true;
+      sqliteUnavailableReason = 'bun:sqlite not available in this Bun version';
+      console.warn('[Memory DB] bun:sqlite not available, memory features disabled');
+      return null;
+    }
   }
 
   // In Node.js environment, use better-sqlite3
@@ -49,11 +76,14 @@ async function loadDatabase(): Promise<any> {
     isBun = false;
     return DatabaseConstructor;
   } catch (error) {
-    throw new Error(
-      '[Memory DB] SQLite driver not found. ' +
-      'In Node.js: npm install better-sqlite3. ' +
-      'In Bun: bun:sqlite should be available.'
+    sqliteUnavailable = true;
+    sqliteUnavailableReason = 'better-sqlite3 not installed. Run: npm install better-sqlite3';
+    console.warn(
+      '[Memory DB] SQLite driver not available. Memory features (semantic search, indexing) disabled.\n' +
+      '  To enable: npm install better-sqlite3\n' +
+      '  Basic Maskweaver features (masks, verify) will still work.'
     );
+    return null;
   }
 }
 
@@ -107,9 +137,15 @@ export class MemoryDatabase {
   /**
    * Create a new MemoryDatabase instance.
    * Uses async factory pattern because better-sqlite3 is dynamically imported.
+   * Returns null if SQLite is not available (graceful degradation).
    */
-  static async create(dbPath: string): Promise<MemoryDatabase> {
+  static async create(dbPath: string): Promise<MemoryDatabase | null> {
     const DatabaseClass = await loadDatabase();
+
+    // SQLite not available - graceful degradation
+    if (!DatabaseClass) {
+      return null;
+    }
 
     // Ensure directory exists
     const dir = dirname(dbPath);
@@ -556,7 +592,11 @@ export class MemoryDatabase {
 
 let defaultInstance: MemoryDatabase | null = null;
 
-export async function initDatabase(dbPath: string): Promise<MemoryDatabase> {
+/**
+ * Initialize the database.
+ * Returns null if SQLite is not available (graceful degradation).
+ */
+export async function initDatabase(dbPath: string): Promise<MemoryDatabase | null> {
   if (defaultInstance) {
     defaultInstance.close();
   }
@@ -564,9 +604,15 @@ export async function initDatabase(dbPath: string): Promise<MemoryDatabase> {
   return defaultInstance;
 }
 
-export function getDatabase(): MemoryDatabase {
-  if (!defaultInstance) {
-    throw new Error('[Memory DB] Database not initialized. Call initDatabase() first.');
+/**
+ * Get the database instance.
+ * Returns null if SQLite is not available or not initialized.
+ * Use this for optional memory features.
+ */
+export function getDatabase(): MemoryDatabase | null {
+  if (!defaultInstance && !isSqliteAvailable()) {
+    // SQLite not available - return null instead of throwing
+    return null;
   }
   return defaultInstance;
 }
@@ -581,24 +627,37 @@ export function tryGetDatabase(): MemoryDatabase | null {
 
 // ============================================================================
 // Convenience Functions
+// These throw errors if SQLite is not available. Use getDatabase() directly
+// for optional access with null checks.
 // ============================================================================
 
 export function upsertChunk(chunk: Chunk, embedding: number[]): number {
-  return getDatabase().upsertChunk(chunk, embedding);
+  const db = getDatabase();
+  if (!db) throw new Error('[Memory DB] SQLite not available');
+  return db.upsertChunk(chunk, embedding);
 }
 
 export function searchByVector(embedding: number[], limit?: number): SearchResult[] {
-  return getDatabase().searchByVector(embedding, limit);
+  const db = getDatabase();
+  if (!db) return [];  // Graceful degradation - return empty results
+  return db.searchByVector(embedding, limit);
 }
 
 export function searchByText(query: string, limit?: number): SearchResult[] {
-  return getDatabase().searchByText(query, limit);
+  const db = getDatabase();
+  if (!db) return [];  // Graceful degradation - return empty results
+  return db.searchByText(query, limit);
 }
 
 export function deleteChunksByPath(path: string): number {
-  return getDatabase().deleteChunksByPath(path);
+  const db = getDatabase();
+  if (!db) return 0;
+  return db.deleteChunksByPath(path);
 }
 
 export function getChunksByPath(path: string): Chunk[] {
-  return getDatabase().getChunksByPath(path);
+  const db = getDatabase();
+  if (!db) return [];
+  return db.getChunksByPath(path);
 }
+

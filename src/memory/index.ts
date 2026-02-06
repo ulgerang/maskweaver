@@ -63,6 +63,8 @@ export {
   initDatabase,
   getDatabase,
   tryGetDatabase,
+  isSqliteAvailable,
+  getSqliteUnavailableReason,
   upsertChunk,
   searchByVector,
   searchByText,

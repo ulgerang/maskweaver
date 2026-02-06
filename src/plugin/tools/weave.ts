@@ -68,7 +68,7 @@ Examples:
                 projectType?: string;
             },
             context: { worktree: string }
-        ) => {
+        ): Promise<string> => {
             const { command } = args;
             const basePath = context.worktree;
 
@@ -96,11 +96,11 @@ Examples:
                         return getHelpMessage();
 
                     default:
-                        return { error: `Unknown command: ${command}. Use 'help' for available commands.` };
+                        return `Error: Unknown command: ${command}. Use 'help' for available commands.`;
                 }
             } catch (e) {
                 const error = e instanceof Error ? e.message : String(e);
-                return { error: `Weave error: ${error}` };
+                return `Error: Weave error: ${error}`;
             }
         },
     };
@@ -113,11 +113,11 @@ Examples:
 async function handleDesign(
     args: { docsPath?: string; projectName?: string },
     basePath: string
-) {
+): Promise<string> {
     const { docsPath, projectName } = args;
 
     if (!docsPath) {
-        return { error: 'docsPath is required for design command. Example: weave design docs/' };
+        return 'Error: docsPath is required for design command. Example: weave design docs/';
     }
 
     // Step 1: Intake
@@ -146,11 +146,7 @@ async function handleDesign(
         lines.push('답변해주시면 계획서를 만들겠습니다.');
         lines.push('(또는 기본값으로 진행하려면 "기본값으로 진행해"라고 해주세요)');
 
-        return {
-            status: 'questions_pending',
-            message: lines.join('\n'),
-            intake: intakeResult,
-        };
+        return lines.join('\n');
     }
 
     // Step 2: Plan (if no questions or defaults accepted)
@@ -159,18 +155,13 @@ async function handleDesign(
         projectName: projectName || 'My Project',
     });
 
-    return {
-        status: 'plan_ready',
-        message: planResult.summary,
-        plan: planResult.plan,
-        estimatedHours: planResult.estimatedTotalHours,
-    };
+    return planResult.summary;
 }
 
 async function handleCraft(
     args: { phaseId?: string; projectType?: string },
     basePath: string
-) {
+): Promise<string> {
     const { phaseId, projectType } = args;
 
     if (!phaseId) {
@@ -182,15 +173,12 @@ async function handleCraft(
         if (!nextPhase) {
             const stats = manager.getStats();
             if (stats.progress === 100) {
-                return { message: '🎉 모든 Phase가 완료되었습니다!' };
+                return '🎉 모든 Phase가 완료되었습니다!';
             }
-            return { error: '실행할 Phase가 없습니다. 먼저 /weave design으로 계획을 세워주세요.' };
+            return 'Error: 실행할 Phase가 없습니다. 먼저 /weave design으로 계획을 세워주세요.';
         }
 
-        return {
-            message: `다음 Phase: ${nextPhase.id} - ${nextPhase.name}\n\n실행하려면: weave craft ${nextPhase.id}`,
-            nextPhase,
-        };
+        return `다음 Phase: ${nextPhase.id} - ${nextPhase.name}\n\n실행하려면: weave craft ${nextPhase.id}`;
     }
 
     // Execute the phase
@@ -209,21 +197,10 @@ async function handleCraft(
         onEvent: (event) => events.push(event),
     });
 
-    return {
-        status: result.success ? 'phase_complete' : 'phase_failed',
-        message: handoffResult.message,
-        result: {
-            tasksCompleted: result.tasksCompleted,
-            tasksFailed: result.tasksFailed,
-            masksUsed: result.masksUsed,
-            troubleshootingUsed: result.troubleshootingUsed,
-            durationMs: result.durationMs,
-        },
-        events,
-    };
+    return handoffResult.message;
 }
 
-async function handleStatus(basePath: string) {
+async function handleStatus(basePath: string): Promise<string> {
     const report = await generateStatusReport();
 
     // Add global knowledge stats
@@ -238,23 +215,20 @@ async function handleStatus(basePath: string) {
         lines.push(`- 주요 프로젝트 유형: ${stats.topProjectTypes.slice(0, 3).map(t => `${t.type}(${t.count})`).join(', ')}`);
     }
 
-    return { message: lines.join('\n') };
+    return lines.join('\n');
 }
 
-async function handleTroubleshoot(args: { error?: string; projectType?: string }) {
+async function handleTroubleshoot(args: { error?: string; projectType?: string }): Promise<string> {
     const { error, projectType } = args;
 
     if (!error) {
-        return { error: 'error is required for troubleshoot command' };
+        return 'Error: error is required for troubleshoot command';
     }
 
     const solutions = await searchTroubleshooting(error, { projectType, limit: 5 });
 
     if (solutions.length === 0) {
-        return {
-            message: '유사한 해결책을 찾지 못했습니다.\n\n문제를 해결하신 후, `weave record`로 해결책을 기록해주세요.',
-            solutions: [],
-        };
+        return '유사한 해결책을 찾지 못했습니다.\n\n문제를 해결하신 후, `weave record`로 해결책을 기록해주세요.';
     }
 
     const lines: string[] = ['## 💡 유사한 해결책 발견\n'];
@@ -269,17 +243,14 @@ async function handleTroubleshoot(args: { error?: string; projectType?: string }
         lines.push('');
     }
 
-    return {
-        message: lines.join('\n'),
-        solutions,
-    };
+    return lines.join('\n');
 }
 
-async function handleRecord(args: { error?: string; solution?: string; context?: string; projectType?: string }) {
+async function handleRecord(args: { error?: string; solution?: string; context?: string; projectType?: string }): Promise<string> {
     const { error, solution, context, projectType } = args;
 
     if (!error || !solution) {
-        return { error: 'error and solution are required for record command' };
+        return 'Error: error and solution are required for record command';
     }
 
     const id = await recordTroubleshooting({
@@ -290,26 +261,22 @@ async function handleRecord(args: { error?: string; solution?: string; context?:
         effectiveness: 7,
     });
 
-    return {
-        message: `✅ 트러블슈팅 솔루션이 기록되었습니다 (ID: ${id})\n\n다음에 비슷한 에러가 발생하면 자동으로 이 해결책을 제안합니다.`,
-        id,
-    };
+    return `✅ 트러블슈팅 솔루션이 기록되었습니다 (ID: ${id})\n\n다음에 비슷한 에러가 발생하면 자동으로 이 해결책을 제안합니다.`;
 }
 
-async function handleApprove(args: { phaseId?: string }) {
+async function handleApprove(args: { phaseId?: string }): Promise<string> {
     const { phaseId } = args;
 
     if (!phaseId) {
-        return { error: 'phaseId is required for approve command' };
+        return 'Error: phaseId is required for approve command';
     }
 
     const result = await handleUserResponse(phaseId, 'approve');
-    return { message: result.message, nextAction: result.nextAction };
+    return result.message;
 }
 
-function getHelpMessage(): { message: string } {
-    return {
-        message: `## 🌀 Weave 워크플로우 도움말
+function getHelpMessage(): string {
+    return `## 🌀 Weave 워크플로우 도움말
 
 **Weave**는 Maskweaver의 Phase-Driven Development 워크플로우입니다.
 "AI가 검증하고, 유저가 확인한다"
@@ -337,6 +304,6 @@ weave design docs/   # 계획 수립
 weave craft P1       # Phase 1 실행
 weave status         # 진행 확인
 \`\`\`
-`,
-    };
+`;
 }
+

@@ -62,24 +62,148 @@ export function normalizeErrorSignature(error: string): string {
 export class GlobalKnowledge {
     private db: any = null;
     private initialized = false;
+    private usingSqlJs = false;
+    private sqlJsDb: any = null;
 
     async init(): Promise<void> {
         if (this.initialized) return;
 
         ensureGlobalDir();
 
+        // Try better-sqlite3 first (fastest, native)
         try {
-            // Dynamic import for better-sqlite3 (optional dependency)
             const Database = await import('better-sqlite3').then(m => m.default);
             this.db = new Database(getGlobalDbPath());
             this.createTables();
             this.initialized = true;
-        } catch (e) {
-            // Fallback to in-memory if SQLite not available
-            console.warn('[GlobalKnowledge] SQLite not available, using in-memory fallback');
-            this.db = null;
-            this.initialized = true;
+            return;
+        } catch {
+            // better-sqlite3 not available, try sql.js
         }
+
+        // Fallback to sql.js (works everywhere, WASM-based)
+        try {
+            // @ts-ignore - sql.js doesn't have TypeScript types
+            const initSqlJs = await import('sql.js').then(m => m.default);
+            const SQL = await initSqlJs();
+
+            // Try to load existing database file
+            const dbPath = getGlobalDbPath();
+            let data: Uint8Array | undefined;
+            try {
+                const fs = await import('fs');
+                if (fs.existsSync(dbPath)) {
+                    data = fs.readFileSync(dbPath);
+                }
+            } catch {
+                // File doesn't exist or can't be read
+            }
+
+            this.sqlJsDb = data ? new SQL.Database(data) : new SQL.Database();
+            this.db = this.createSqlJsWrapper(this.sqlJsDb, dbPath);
+            this.usingSqlJs = true;
+            this.createTables();
+            this.initialized = true;
+            return;
+        } catch {
+            // sql.js also not available
+        }
+
+        // Final fallback: in-memory only (no persistence)
+        console.warn('[GlobalKnowledge] No SQLite driver available. Knowledge will not persist between sessions.');
+        this.db = null;
+        this.initialized = true;
+    }
+
+    /**
+     * Create a wrapper that mimics better-sqlite3 API using sql.js
+     */
+    private createSqlJsWrapper(sqlJsDb: any, dbPath: string) {
+        const saveToFile = () => {
+            try {
+                const data = sqlJsDb.export();
+                const fs = require('fs');
+                fs.writeFileSync(dbPath, Buffer.from(data));
+            } catch {
+                // Ignore save errors
+            }
+        };
+
+        return {
+            exec: (sql: string) => {
+                try {
+                    sqlJsDb.run(sql);
+                    saveToFile();
+                } catch (e) {
+                    console.warn('[sql.js] exec error:', e);
+                }
+            },
+            prepare: (sql: string) => {
+                return {
+                    run: (...params: any[]) => {
+                        try {
+                            // Flatten params if first element is array
+                            const flatParams = params.length === 1 && Array.isArray(params[0])
+                                ? params[0]
+                                : params;
+                            sqlJsDb.run(sql, flatParams.length > 0 ? flatParams : undefined);
+                            saveToFile();
+                            return { changes: sqlJsDb.getRowsModified() };
+                        } catch (e) {
+                            console.warn('[sql.js] run error:', e);
+                            return { changes: 0 };
+                        }
+                    },
+                    get: (...params: any[]) => {
+                        try {
+                            const stmt = sqlJsDb.prepare(sql);
+                            // Flatten params if first element is array
+                            const flatParams = params.length === 1 && Array.isArray(params[0])
+                                ? params[0]
+                                : params;
+                            if (flatParams.length > 0) {
+                                stmt.bind(flatParams);
+                            }
+                            if (stmt.step()) {
+                                const row = stmt.getAsObject();
+                                stmt.free();
+                                return row;
+                            }
+                            stmt.free();
+                            return undefined;
+                        } catch (e) {
+                            console.warn('[sql.js] get error:', e);
+                            return undefined;
+                        }
+                    },
+                    all: (...params: any[]) => {
+                        try {
+                            const results: any[] = [];
+                            const stmt = sqlJsDb.prepare(sql);
+                            // Flatten params if first element is array
+                            const flatParams = params.length === 1 && Array.isArray(params[0])
+                                ? params[0]
+                                : params;
+                            if (flatParams.length > 0) {
+                                stmt.bind(flatParams);
+                            }
+                            while (stmt.step()) {
+                                results.push(stmt.getAsObject());
+                            }
+                            stmt.free();
+                            return results;
+                        } catch (e) {
+                            console.warn('[sql.js] all error:', e);
+                            return [];
+                        }
+                    },
+                };
+            },
+            close: () => {
+                saveToFile();
+                sqlJsDb.close();
+            },
+        };
     }
 
     private createTables(): void {

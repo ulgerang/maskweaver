@@ -154,7 +154,7 @@ Smart subagents for cost-efficient multi-agent workflows:
 | `@dummy-human` | Balanced | 💰💰 | Code writing, reviews, general work |
 | `@dummy-premium` | Powerful | 💰💰💰 | Architecture, complex debugging |
 
-### 🧵 Weave Workflow (ZDD 4.0)
+### 🧵 Weave Workflow
 
 **Phase-Driven Development** — "AI verifies, Human validates"
 

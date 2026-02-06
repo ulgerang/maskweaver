@@ -797,7 +797,7 @@ export VOYAGEAI_API_KEY=...
 ## Next Steps
 
 - 📖 [Masks Guide](masks.md) - Learn about creating expert personas
-- 🧵 [Weave Workflow](../README.md#-weave-workflow-zdd-40) - Phase-driven development with AI verification
+- 🧵 [Weave Workflow](../README.md#-weave-workflow) - Phase-driven development with AI verification
 - 🚀 [Installation Guide](installation.md) - Get started with Maskweaver
 - 💬 [Ask questions](https://github.com/ulgerang/maskweaver/discussions)
 

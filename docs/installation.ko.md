@@ -824,7 +824,7 @@ EOF
 - 🧠 **글로벌 지식**: 프로젝트 간 트러블슈팅 솔루션 (RAG)
 - 📊 **진행 추적**: 실시간 Phase 및 Task 상태
 
-자세한 내용은 [README](../README.ko.md#-weave-워크플로우-zdd-40)를 참조하세요.
+자세한 내용은 [README](../README.ko.md#-weave-워크플로우)를 참조하세요.
 
 ---
 
@@ -832,7 +832,7 @@ EOF
 
 - 📖 고급 설정을 위한 [설정 가이드](configuration.md) 읽기
 - 🎭 [가면 가이드](masks.md)에서 사용 가능한 가면 탐색
-- 🧵 [Weave 워크플로우](../README.ko.md#-weave-워크플로우-zdd-40) - Phase 기반 개발
+- 🧵 [Weave 워크플로우](../README.ko.md#-weave-워크플로우) - Phase 기반 개발
 - 🚀 [빠른 시작](../README.ko.md#빠른-시작) 예제 확인
 
 ---

@@ -843,7 +843,7 @@ After installation, try the **Weave workflow** - a phase-driven development syst
 - 🧠 **Global Knowledge**: Cross-project troubleshooting solutions (RAG)
 - 📊 **Progress Tracking**: Real-time phase and task status
 
-See the [README](../README.md#-weave-workflow-zdd-40) for full documentation.
+See the [README](../README.md#-weave-workflow) for full documentation.
 
 ---
 
@@ -851,7 +851,7 @@ See the [README](../README.md#-weave-workflow-zdd-40) for full documentation.
 
 - 📖 [Configuration Guide](configuration.md) - Advanced options
 - 🎭 [Masks Guide](masks.md) - Creating custom personas
-- 🧵 [Weave Workflow](../README.md#-weave-workflow-zdd-40) - Phase-driven development
+- 🧵 [Weave Workflow](../README.md#-weave-workflow) - Phase-driven development
 - 🚀 [Quick Start](../README.md#quick-start) - Usage examples
 
 ---

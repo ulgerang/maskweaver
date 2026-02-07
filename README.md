@@ -158,7 +158,7 @@ Smart subagents for cost-efficient multi-agent workflows:
 
 **Phase-Driven Development** — "AI verifies, Human validates"
 
-Weave is Maskweaver's flagship workflow that implements **Zero-Defect Development 4.0**. It breaks work into testable phases, auto-selects expert masks, and runs self-verification loops before handing off to you.
+Weave is Maskweaver's flagship workflow. It breaks work into testable phases, auto-selects expert masks, and runs self-verification loops before handing off to you.
 
 #### Commands
 

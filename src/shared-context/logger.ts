@@ -7,6 +7,7 @@
  * @author Kent Beck's Dummy Human
  */
 
+import { readFile } from "fs/promises";
 import type { LogEvent, LogEventInput } from "./types.js";
 import type { Session } from "./session.js";
 
@@ -66,7 +67,7 @@ export async function readLog(
   const fullPath = session.storage.getFullPath(logPath);
 
   try {
-    const content = await Bun.file(fullPath).text();
+    const content = await readFile(fullPath, "utf-8");
     return content
       .split("\n")
       .filter(Boolean)

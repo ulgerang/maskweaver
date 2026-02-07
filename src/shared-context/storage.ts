@@ -149,7 +149,7 @@ export function validatePath(fullPath: string, baseDir: string): boolean {
  */
 async function atomicWrite(filePath: string, data: string): Promise<void> {
   const tempPath = `${filePath}.tmp.${Date.now()}`;
-  await Bun.write(tempPath, data);
+  await writeFile(tempPath, data, "utf-8");
   await rename(tempPath, filePath);
 }
 

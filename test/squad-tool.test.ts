@@ -2,7 +2,7 @@
  * Maskweaver Squad Tool Tests
  */
 
-import { test, expect, describe, beforeEach, afterEach } from "bun:test";
+import { test, expect, describe, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { createSquadTool } from "../src/plugin/tools/squad.js";

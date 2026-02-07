@@ -205,7 +205,8 @@ describe("readLog", () => {
 
     // Create an empty log file
     const logPath = `${session.sessionPath}/squads/${squadId}/log.jsonl`;
-    await Bun.write(storage.getFullPath(logPath), "");
+    const { writeFile } = await import("fs/promises");
+    await writeFile(storage.getFullPath(logPath), "");
 
     // Act
     const events = await readLog(session, squadId);

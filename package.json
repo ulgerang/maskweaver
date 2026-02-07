@@ -78,7 +78,7 @@
     "build:bun": "bun build ./src/index.ts --outdir dist --target node",
     "clean": "rm -rf dist",
     "dev": "tsc --watch",
-    "test": "bun test",
+    "test": "vitest run",
     "lint": "eslint src --ext .ts",
     "prepublishOnly": "npm run build"
   },

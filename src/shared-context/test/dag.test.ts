@@ -1,6 +1,6 @@
 // src/shared-context/test/dag.test.ts
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from 'vitest';
 import {
   buildDAG,
   getReadyTasks,

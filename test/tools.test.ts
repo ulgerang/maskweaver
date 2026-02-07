@@ -12,7 +12,7 @@
  * @author Kent Beck's Dummy Human
  */
 
-import { test, expect, describe, beforeEach, afterEach } from "bun:test";
+import { test, expect, describe, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { createMemorySearchTool } from "../src/plugin/tools/memorySearch.js";

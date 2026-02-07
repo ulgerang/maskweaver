@@ -7,8 +7,8 @@
  * @author Kent Beck's Dummy Human
  */
 
-import { test, expect, describe, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm, readFile } from "fs/promises";
+import { test, expect, describe, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, readFile, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -205,7 +205,7 @@ describe("FileStorageAdapter", () => {
 
       // Assert - Write a file to verify directory exists
       const testFile = join(nestedPath, "test.txt");
-      await Bun.write(testFile, "test");
+      await writeFile(testFile, "test");
       const content = await readFile(testFile, "utf-8");
       expect(content).toBe("test");
     });

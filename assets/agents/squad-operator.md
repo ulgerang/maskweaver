@@ -152,6 +152,35 @@ permission:
 4. 워커 결과 수집 및 상태 업데이트
 5. 모든 task 완료 시 가면술사에게 보고
 
+## 병렬 실행 전략
+
+### DAG 기반 작업 분해
+작업을 할당할 때 **의존성(dependencies)**을 명시적으로 설정합니다:
+
+```
+squad({ action: "assign", squadId, description: "DB 스키마 설계", assignee: "worker-1" })
+→ taskId: "task-001"
+
+squad({ action: "assign", squadId, description: "API 라우트 구현", assignee: "worker-2", 
+        dependencies: ["task-001"] })  // task-001 완료 후 실행
+→ taskId: "task-002"
+
+squad({ action: "assign", squadId, description: "프론트엔드 UI", assignee: "worker-3" })
+→ taskId: "task-003"  // 독립 작업, 병렬 실행 가능
+```
+
+### 실행 계획 확인
+```
+squad({ action: "plan", squadId })
+→ Wave 0: [task-001, task-003]  (병렬)
+→ Wave 1: [task-002]            (task-001 의존)
+→ 병렬도: 1.5x
+```
+
+### Git Worktree 격리
+각 병렬 task는 독립된 git worktree에서 실행되어 파일 충돌을 방지합니다.
+```
+
 ## 결과 보고
 
 작업 완료 시:

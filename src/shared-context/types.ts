@@ -14,6 +14,7 @@
 
 import { z } from "zod";
 
+
 // ============================================================================
 // Base Types
 // ============================================================================
@@ -361,6 +362,15 @@ export const SquadStateSchema = z.object({
   sharedContext: z.record(z.string(), z.unknown()),
   updatedAt: z.string().datetime(),
 });
+
+// Session (session.ts:41-48)
+export interface Session {
+  manifest: Manifest;
+  storage: StorageAdapter;
+  sessionPath: string;
+}
+
+import { StorageAdapter } from "./storage.js";
 
 // ============================================================================
 // Log Events - Discriminated union for event types

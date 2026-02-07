@@ -7,7 +7,7 @@
  * @author Kent Beck's TDD Approach
  */
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "os";
 import { join } from "path";
 import { rm, mkdir } from "fs/promises";

@@ -6,7 +6,7 @@
  * Red-Green-Refactor cycle for session.ts
  */
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";

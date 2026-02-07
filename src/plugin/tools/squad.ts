@@ -29,7 +29,8 @@ export const squadSchema = z.object({
     "complete",   // Complete task (squadId, taskId, result required)
     "status",     // View session/squad status
     "watchdog",   // Run watchdog (dryRun optional)
-    "list"        // List all squads
+    "list",       // List all squads
+    "plan"        // Analyze task dependencies and create parallel execution plan
   ]).describe("Action to execute"),
   
   // start action params
@@ -152,6 +153,50 @@ async function loadActiveSession(basePath: string): Promise<shared.Session | nul
 // Tool Factory
 // ============================================================================
 
+/**
+ * Analyze task dependencies and create parallel execution plan
+ */
+async function handlePlan(basePath: string, squadId: string | undefined): Promise<string> {
+  if (!squadId || squadId.trim().length === 0) {
+    return errorResponse("plan", 'Squad ID is required. Example: squadId="squad-abc123"');
+  }
+
+  const session = await loadActiveSession(basePath);
+  if (!session) {
+    return errorResponse("plan", 'No active session. Start a session first with action="start"');
+  }
+
+  try {
+    const plan = await shared.createExecutionPlan(session, squadId);
+
+    let planOutput = `Execution Plan for Squad ${squadId} (Mission: ${plan.squadId})\n`;
+    planOutput += `Total tasks: ${plan.dag.nodes.size}\n`;
+    planOutput += `Total waves: ${plan.waves.length}\n`;
+    planOutput += `Estimated parallelism factor: ${plan.estimatedParallelism.toFixed(2)}x\n`;
+    planOutput += `Critical path length: ${plan.dag.criticalPath.length} tasks (${plan.dag.criticalPath.join(' -> ')})\n`;
+    planOutput += `Has cycle: ${plan.dag.hasCycle}\n\n`;
+
+    planOutput += "Waves:\n";
+    plan.waves.forEach((wave: shared.ExecutionWave) => {
+      planOutput += `  Wave ${wave.waveIndex}: [${wave.taskIds.join(', ')}]\n`;
+    });
+
+    return successResponse("plan", "Execution plan generated", {
+      squadId: plan.squadId,
+      totalTasks: plan.dag.nodes.size,
+      totalWaves: plan.waves.length,
+      estimatedParallelism: plan.estimatedParallelism,
+      criticalPath: plan.dag.criticalPath,
+      hasCycle: plan.dag.hasCycle,
+      waves: plan.waves,
+      rawOutput: planOutput, // Include a raw string for easier display
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return errorResponse("plan", `Failed to generate execution plan: ${message}`);
+  }
+}
+
 export function createSquadTool(): ToolFactory {
   return {
     description: `Multi-agent collaboration management.
@@ -185,7 +230,8 @@ Direct use of assign/update/complete by primary agent pollutes strategic context
 - \`complete\`: Complete task (squadId, taskId, success required)
 - \`status\`: View session or squad status (squadId optional)
 - \`watchdog\`: Run timeout watchdog (dryRun optional)
-- \`list\`: List all squads in session
+    - \`list\`: List all squads in session
+    - \`plan\`: Analyze task dependencies and create parallel execution plan (squadId required)
 
 **Examples:**
 - Start session: action="start", goal="Implement OAuth login"
@@ -223,6 +269,9 @@ Direct use of assign/update/complete by primary agent pollutes strategic context
 
           case "list":
             return await handleList(basePath);
+
+          case "plan":
+            return await handlePlan(basePath, args.squadId);
 
           default:
             return errorResponse(

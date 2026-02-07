@@ -34,6 +34,18 @@ export {
 // Task
 export { assignTask, getTask, updateTask, completeTask } from "./task.js";
 
+// DAG Analysis
+export { buildDAG, getReadyTasks, areDependenciesMet, validateDependencies } from "./dag.js";
+export type { DAGNode, ExecutionWave, DAGAnalysis } from "./dag.js";
+
+// Worktree
+export { createWorktreeManager } from "./worktree.js";
+export type { WorktreeManager, WorktreeInfo, WorktreeManagerOptions } from "./worktree.js";
+
+// Parallel Execution
+export { createExecutionPlan, executeWave } from "./parallel-executor.js";
+export type { ParallelExecutionPlan, WaveExecutionResult, ParallelExecutionOptions } from "./parallel-executor.js";
+
 // Watchdog
 export { 
   checkSquadTimeout, 

@@ -1,6 +1,5 @@
 ---
 description: "Squad Operator - Squad 미션을 조율하고 워커에게 작업 할당"
-model: google/gemini-2.5-flash
 mode: subagent
 temperature: 0.3
 permission:

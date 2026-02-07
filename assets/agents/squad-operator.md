@@ -6,6 +6,8 @@ temperature: 0.3
 permission:
   edit: allow
   bash: allow
+  task:
+    "*": allow
 ---
 
 # Squad Operator

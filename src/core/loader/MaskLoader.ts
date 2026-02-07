@@ -4,6 +4,8 @@
  * Loads mask definitions from the file system.
  */
 
+import { readFile } from 'fs/promises';
+import { existsSync } from 'fs';
 import { parse as parseYaml } from 'yaml';
 import { validateMaskOrThrow } from '../schema/validator';
 import type { MaskSchema, MaskCatalog, LoadedMask, MaskCatalogEntry } from '../schema/types';
@@ -30,13 +32,13 @@ export class MaskLoader {
     }
     
     const indexPath = `${this.masksDir}/index.json`;
-    const file = Bun.file(indexPath);
     
-    if (!(await file.exists())) {
+    if (!existsSync(indexPath)) {
       throw new Error(`Mask catalog not found: ${indexPath}`);
     }
     
-    this.catalog = await file.json() as MaskCatalog;
+    const content = await readFile(indexPath, "utf-8");
+    this.catalog = JSON.parse(content) as MaskCatalog;
     return this.catalog;
   }
   
@@ -93,13 +95,12 @@ export class MaskLoader {
     
     // Load mask file
     const filePath = `${this.masksDir}/${entry.file}`;
-    const file = Bun.file(filePath);
     
-    if (!(await file.exists())) {
+    if (!existsSync(filePath)) {
       throw new Error(`Mask file not found: ${filePath}`);
     }
     
-    const content = await file.text();
+    const content = await readFile(filePath, "utf-8");
     const parsed = filePath.endsWith('.yaml') || filePath.endsWith('.yml')
       ? parseYaml(content)
       : JSON.parse(content);

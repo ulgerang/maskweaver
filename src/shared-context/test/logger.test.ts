@@ -10,7 +10,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "os";
 import { join } from "path";
-import { rm, mkdir } from "fs/promises";
+import { rm, mkdir, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 
 import { logEvent, readLog } from "../logger.js";
@@ -205,7 +205,6 @@ describe("readLog", () => {
 
     // Create an empty log file
     const logPath = `${session.sessionPath}/squads/${squadId}/log.jsonl`;
-    const { writeFile } = await import("fs/promises");
     await writeFile(storage.getFullPath(logPath), "");
 
     // Act

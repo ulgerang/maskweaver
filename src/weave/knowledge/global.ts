@@ -232,8 +232,12 @@ export class GlobalKnowledge {
 
         // FTS5 virtual table and sync triggers — requires FTS5 extension
         // (available in better-sqlite3 but NOT in default sql.js WASM builds)
-        try {
-            this.db.exec(`
+        // Skip FTS5 entirely for sql.js to avoid WASM-level warnings
+        if (this.usingSqlJs) {
+            this.ftsAvailable = false;
+        } else {
+            try {
+                this.db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS troubleshooting_fts USING fts5(
         error_message,
         context,
@@ -261,10 +265,11 @@ export class GlobalKnowledge {
         VALUES (new.id, new.error_message, new.context, new.solution, new.tags);
       END;
       `);
-            this.ftsAvailable = true;
-        } catch {
-            // FTS5 not available (e.g. sql.js WASM build) — search falls back to exact matches only
-            this.ftsAvailable = false;
+                this.ftsAvailable = true;
+            } catch {
+                // FTS5 not available — search falls back to exact matches only
+                this.ftsAvailable = false;
+            }
         }
     }
 

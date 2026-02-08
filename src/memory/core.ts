@@ -105,16 +105,30 @@ export function determineSource(filePath: string): SourceType {
 // Similarity
 // ============================================================================
 
+// Deduplicated warning: only log dimension mismatch once per session
+let _dimensionMismatchWarned = false;
+
 /**
  * Calculate cosine similarity between two vectors.
  * Single pass for efficiency.
+ * 
+ * Returns 0 on dimension mismatch instead of throwing,
+ * to prevent a single bad embedding from crashing the entire search.
  */
 export function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) {
-    throw new Error(`Vector dimension mismatch: ${a.length} vs ${b.length}`);
-  }
+  if (a.length === 0 || b.length === 0) return 0;
   
-  if (a.length === 0) return 0;
+  if (a.length !== b.length) {
+    if (!_dimensionMismatchWarned) {
+      console.warn(
+        `[Memory] Vector dimension mismatch: ${a.length} vs ${b.length}. ` +
+        `This usually means the embedding provider changed (e.g., fallback to text-only). ` +
+        `Mismatched vectors will be scored as 0. This warning is logged once per session.`
+      );
+      _dimensionMismatchWarned = true;
+    }
+    return 0;
+  }
   
   let dotProduct = 0;
   let magnitudeA = 0;
@@ -134,13 +148,24 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 
 /**
  * Float32 version - more memory efficient.
+ * 
+ * Returns 0 on dimension mismatch instead of throwing,
+ * to prevent a single bad embedding from crashing the entire search.
  */
 export function cosineSimilarityFloat32(a: Float32Array, b: Float32Array): number {
-  if (a.length !== b.length) {
-    throw new Error(`Vector dimension mismatch: ${a.length} vs ${b.length}`);
-  }
+  if (a.length === 0 || b.length === 0) return 0;
   
-  if (a.length === 0) return 0;
+  if (a.length !== b.length) {
+    if (!_dimensionMismatchWarned) {
+      console.warn(
+        `[Memory] Vector dimension mismatch: ${a.length} vs ${b.length}. ` +
+        `This usually means the embedding provider changed (e.g., fallback to text-only). ` +
+        `Mismatched vectors will be scored as 0. This warning is logged once per session.`
+      );
+      _dimensionMismatchWarned = true;
+    }
+    return 0;
+  }
   
   let dotProduct = 0;
   let magnitudeA = 0;

@@ -3,6 +3,7 @@
  * 
  * Graceful degradation when no embedding service is available.
  * Returns empty vectors, allowing the system to function in text-only mode.
+ * Vector search is skipped; only FTS keyword matching is used.
  * 
  * Use case: Development, testing, or when embedding APIs are unavailable.
  */
@@ -14,9 +15,16 @@ export class TextOnlyProvider implements IEmbeddingProvider {
   readonly type = "text-only" as const;
   readonly dimensions: number;
 
+  /**
+   * When true, signals that this provider cannot produce meaningful embeddings.
+   * Consumers should skip vector search and rely on text/keyword search only.
+   */
+  readonly isTextOnly = true;
+
   constructor(config: ProviderConfig) {
-    // Minimal dimensions for compatibility
-    this.dimensions = config.dimensions || 1;
+    // dimensions = 0 signals "no real embeddings" — consumers should skip vector ops.
+    // If an explicit dimension is provided (e.g., for testing), honor it.
+    this.dimensions = config.dimensions ?? 0;
   }
 
   async healthCheck(): Promise<HealthCheckResult> {
@@ -28,12 +36,12 @@ export class TextOnlyProvider implements IEmbeddingProvider {
   }
 
   async embed(texts: string[]): Promise<Embedding[]> {
-    // Return zero vectors
-    return texts.map(() => new Array(this.dimensions).fill(0));
+    // Return empty vectors — dimension 0 signals "no real embedding"
+    return texts.map(() => []);
   }
 
   async embedQuery(text: string): Promise<Embedding> {
-    return new Array(this.dimensions).fill(0);
+    return [];
   }
 
   async embedCode(texts: string[]): Promise<Embedding[]> {

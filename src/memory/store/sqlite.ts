@@ -129,6 +129,7 @@ interface FtsRow {
 export class MemoryDatabase {
   private db: any; // Database.Database type
   private statements: Map<string, any> = new Map();
+  private ftsAvailable: boolean = false;
 
   private constructor(db: any) {
     this.db = db;
@@ -221,6 +222,7 @@ export class MemoryDatabase {
     `);
 
     // FTS5 virtual table
+    this.ftsAvailable = false;
     try {
       this.db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
@@ -230,29 +232,37 @@ export class MemoryDatabase {
           tokenize='unicode61'
         );
       `);
+      this.ftsAvailable = true;
     } catch (error) {
-      // FTS5 already exists or not supported
-      console.warn('[Memory DB] FTS table setup skipped:', error);
+      // FTS5 not supported by this SQLite build
+      console.warn('[Memory DB] FTS5 not available. Text search will be disabled:', error);
     }
 
-    // FTS triggers
-    this.db.exec(`
-      -- INSERT trigger
-      CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
-        INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
-      END;
+    // FTS triggers — only if FTS table was created successfully
+    if (this.ftsAvailable) {
+      try {
+        this.db.exec(`
+          -- INSERT trigger
+          CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
+            INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+          END;
 
-      -- DELETE trigger
-      CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
-        INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES('delete', old.id, old.text);
-      END;
+          -- DELETE trigger
+          CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
+            INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES('delete', old.id, old.text);
+          END;
 
-      -- UPDATE trigger
-      CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
-        INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES('delete', old.id, old.text);
-        INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
-      END;
-    `);
+          -- UPDATE trigger
+          CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
+            INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES('delete', old.id, old.text);
+            INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+          END;
+        `);
+      } catch (error) {
+        console.warn('[Memory DB] FTS triggers setup failed:', error);
+        this.ftsAvailable = false;
+      }
+    }
   }
 
   /**
@@ -295,13 +305,16 @@ export class MemoryDatabase {
       JOIN embeddings e ON c.id = e.chunk_id
     `));
 
-    this.statements.set('searchFts', this.db.prepare(`
-      SELECT rowid, text, rank
-      FROM chunks_fts
-      WHERE chunks_fts MATCH ?
-      ORDER BY rank
-      LIMIT ?
-    `));
+    // FTS statement — only prepare if FTS table exists
+    if (this.ftsAvailable) {
+      this.statements.set('searchFts', this.db.prepare(`
+        SELECT rowid, text, rank
+        FROM chunks_fts
+        WHERE chunks_fts MATCH ?
+        ORDER BY rank
+        LIMIT ?
+      `));
+    }
 
     this.statements.set('getChunksByPath', this.db.prepare(`
       SELECT * FROM chunks WHERE path = ?
@@ -330,6 +343,10 @@ export class MemoryDatabase {
 
   /**
    * Insert or update chunk.
+   * 
+   * If embedding is empty (e.g., text-only mode), the chunk is stored
+   * but the embedding row is skipped. This allows text search to work
+   * while vector search gracefully returns no results for these chunks.
    */
   upsertChunk(chunk: Chunk, embedding: number[]): number {
     const stmt = this.statements.get('upsertChunk')!;
@@ -346,10 +363,12 @@ export class MemoryDatabase {
       throw new Error('[Memory DB] Failed to upsert chunk');
     }
 
-    // Save embedding
-    const embStmt = this.statements.get('upsertEmbedding')!;
-    const embeddingBlob = embeddingToBlob(embedding);
-    embStmt.run(result.id, embeddingBlob);
+    // Only save embedding if it has actual content
+    if (embedding && embedding.length > 0) {
+      const embStmt = this.statements.get('upsertEmbedding')!;
+      const embeddingBlob = embeddingToBlob(embedding);
+      embStmt.run(result.id, embeddingBlob);
+    }
 
     return result.id;
   }
@@ -414,12 +433,20 @@ export class MemoryDatabase {
 
   /**
    * Vector similarity search.
+   * 
+   * Returns empty results if queryEmbedding is empty (e.g., text-only mode).
+   * Skips stored embeddings with dimension mismatches instead of crashing.
    */
   searchByVector(
     queryEmbedding: number[],
     limit: number = 6,
     sourceFilter?: Chunk['source'][]
   ): SearchResult[] {
+    // Empty embedding = text-only mode. Skip vector search entirely.
+    if (!queryEmbedding || queryEmbedding.length === 0) {
+      return [];
+    }
+
     const queryVec = toFloat32Array(queryEmbedding);
 
     // Get all embeddings
@@ -432,52 +459,68 @@ export class MemoryDatabase {
     }
 
     // Calculate similarities and sort
-    const results: SearchResult[] = rows
-      .map(row => {
-        const embeddingVec = blobToEmbedding(row.embedding);
-        const score = cosineSimilarityFloat32(queryVec, embeddingVec);
+    // cosineSimilarityFloat32 returns 0 on dimension mismatch (no throw)
+    const scored: SearchResult[] = [];
+    for (const row of rows) {
+      const embeddingVec = blobToEmbedding(row.embedding);
+      
+      // Skip rows with empty or invalid embeddings
+      if (embeddingVec.length === 0) {
+        continue;
+      }
 
-        return {
-          chunk: {
-            id: row.id,
-            path: row.path,
-            startLine: row.start_line,
-            endLine: row.end_line,
-            text: row.text,
-            hash: row.hash,
-            source: row.source as Chunk['source'],
-            createdAt: row.created_at,
-          },
-          score,
-          matchType: 'vector' as const,
-        };
-      })
+      const score = cosineSimilarityFloat32(queryVec, embeddingVec);
+
+      scored.push({
+        chunk: {
+          id: row.id,
+          path: row.path,
+          startLine: row.start_line,
+          endLine: row.end_line,
+          text: row.text,
+          hash: row.hash,
+          source: row.source as Chunk['source'],
+          createdAt: row.created_at,
+        },
+        score,
+        matchType: 'vector' as const,
+      });
+    }
+
+    return scored
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
-
-    return results;
   }
 
   /**
    * Full-text search using FTS5.
+   * Returns empty results if FTS is not available.
    */
   searchByText(query: string, limit: number = 6): SearchResult[] {
+    if (!this.ftsAvailable) {
+      return [];
+    }
+
     const normalizedQuery = this.normalizeFtsQuery(query);
     if (!normalizedQuery) return [];
 
     try {
-      const stmt = this.statements.get('searchFts')!;
+      const stmt = this.statements.get('searchFts');
+      if (!stmt) return [];
+      
       const ftsResults = stmt.all(normalizedQuery, limit) as FtsRow[];
 
       const chunkStmt = this.statements.get('getChunkById')!;
 
-      return ftsResults.map(fts => {
-        const chunk = chunkStmt.get(fts.rowid) as ChunkRow;
+      const results: SearchResult[] = [];
+      for (const fts of ftsResults) {
+        const chunk = chunkStmt.get(fts.rowid) as ChunkRow | undefined;
+        if (!chunk) continue;
 
         // Normalize BM25 score to 0-1 range
         const normalizedScore = Math.min(1, Math.max(0, -fts.rank / 10));
 
-        return {
+        results.push({
           chunk: {
             id: chunk.id,
             path: chunk.path,
@@ -490,8 +533,9 @@ export class MemoryDatabase {
           },
           score: normalizedScore,
           matchType: 'text' as const,
-        };
-      });
+        });
+      }
+      return results;
     } catch (error) {
       console.warn('[Memory DB] FTS search error:', error);
       return [];
@@ -572,6 +616,10 @@ export class MemoryDatabase {
 
 
   rebuildFtsIndex(): void {
+    if (!this.ftsAvailable) {
+      console.warn('[Memory DB] FTS not available, cannot rebuild index.');
+      return;
+    }
     this.db.exec("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')");
   }
 

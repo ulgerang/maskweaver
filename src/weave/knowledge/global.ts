@@ -64,6 +64,7 @@ export class GlobalKnowledge {
     private initialized = false;
     private usingSqlJs = false;
     private sqlJsDb: any = null;
+    private ftsAvailable = false;
 
     async init(): Promise<void> {
         if (this.initialized) return;
@@ -131,12 +132,8 @@ export class GlobalKnowledge {
 
         return {
             exec: (sql: string) => {
-                try {
-                    sqlJsDb.run(sql);
-                    saveToFile();
-                } catch (e) {
-                    console.warn('[sql.js] exec error:', e);
-                }
+                sqlJsDb.run(sql);
+                saveToFile();
             },
             prepare: (sql: string) => {
                 return {
@@ -209,6 +206,7 @@ export class GlobalKnowledge {
     private createTables(): void {
         if (!this.db) return;
 
+        // Core table and indexes — always works
         this.db.exec(`
       CREATE TABLE IF NOT EXISTS troubleshooting (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -230,7 +228,12 @@ export class GlobalKnowledge {
       
       CREATE INDEX IF NOT EXISTS idx_project_type 
         ON troubleshooting(project_type);
+    `);
 
+        // FTS5 virtual table and sync triggers — requires FTS5 extension
+        // (available in better-sqlite3 but NOT in default sql.js WASM builds)
+        try {
+            this.db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS troubleshooting_fts USING fts5(
         error_message,
         context,
@@ -257,7 +260,12 @@ export class GlobalKnowledge {
         INSERT INTO troubleshooting_fts(rowid, error_message, context, solution, tags)
         VALUES (new.id, new.error_message, new.context, new.solution, new.tags);
       END;
-    `);
+      `);
+            this.ftsAvailable = true;
+        } catch {
+            // FTS5 not available (e.g. sql.js WASM build) — search falls back to exact matches only
+            this.ftsAvailable = false;
+        }
     }
 
     /**
@@ -335,7 +343,7 @@ export class GlobalKnowledge {
         }
 
         // 2. FTS search for similar errors (if not enough exact matches)
-        if (results.length < limit) {
+        if (this.ftsAvailable && results.length < limit) {
             const remaining = limit - results.length;
             const existingIds = results.map(r => r.entry.id);
 

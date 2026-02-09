@@ -233,8 +233,108 @@ export async function handleUserResponse(
 // Status Report
 // ============================================================================
 
-export async function generateStatusReport(): Promise<string> {
-    const manager = getPhaseManager();
+export async function generateStatusReport(basePath?: string): Promise<string> {
+    const manager = basePath ? getPhaseManager(basePath) : getPhaseManager();
+
+    // Check for multi-plan mode via state.yaml
+    const state = await manager.loadState();
+
+    if (state) {
+        // Multi-plan mode
+        const allPlans = await manager.loadAllPlans();
+
+        if (allPlans.length === 0) {
+            return '📋 아직 계획이 없습니다.\n\n시작하려면: `/weave design [docs-path]`';
+        }
+
+        const activePlanName = await manager.getActivePlanName();
+
+        // Load active plan for detailed view
+        const plan = await manager.loadPlan();
+        const lines: string[] = [];
+
+        // All plans overview
+        lines.push(`## 📊 Weave 진행 상황 (${allPlans.length} plans)`);
+        lines.push('');
+
+        lines.push('### 📁 모든 Plans');
+        lines.push('');
+        lines.push('| Plan | Progress | Phases | Status |');
+        lines.push('|------|----------|--------|--------|');
+
+        for (const p of allPlans) {
+            const total = p.phases.length;
+            const completed = p.phases.filter(ph => ph.status === 'completed').length;
+            const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+            const isActive = p.projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') === activePlanName;
+            const marker = isActive ? ' ✨' : '';
+            const status = progress === 100 ? '✅ 완료' : p.phases.some(ph => ph.status === 'in_progress') ? '🔄 진행중' : '⏳ 대기';
+            lines.push(`| ${p.projectName}${marker} | ${progress}% | ${completed}/${total} | ${status} |`);
+        }
+
+        lines.push('');
+
+        // Active plan detail
+        if (plan) {
+            const stats = manager.getStats();
+            lines.push(`### 🎯 Active Plan: ${plan.projectName}`);
+            lines.push('');
+            lines.push(`**진행률**: ${stats.progress}%`);
+
+            // Progress bar
+            const filled = Math.round(stats.progress / 5);
+            const empty = 20 - filled;
+            lines.push(`[${'\u2588'.repeat(filled)}${'\u2591'.repeat(empty)}] ${stats.completedPhases}/${stats.totalPhases}`);
+            lines.push('');
+
+            // Phase list
+            lines.push('### Phases');
+            lines.push('');
+
+            for (const phase of plan.phases) {
+                let icon: string;
+                switch (phase.status) {
+                    case 'completed': icon = '✅'; break;
+                    case 'in_progress': icon = '🔄'; break;
+                    case 'blocked': icon = '🚫'; break;
+                    default: icon = '⏳';
+                }
+
+                let line = `${icon} **${phase.id}**: ${phase.name}`;
+
+                if (phase.status === 'completed' && phase.actualHours) {
+                    line += ` (${phase.actualHours}h)`;
+                }
+
+                if (phase.masksUsed && phase.masksUsed.length > 0) {
+                    line += ` [${phase.masksUsed.join(', ')}]`;
+                }
+
+                lines.push(line);
+            }
+
+            lines.push('');
+
+            // Next action
+            const currentPhase = plan.phases.find(p => p.status === 'in_progress');
+            const nextPhase = manager.getNextPhase();
+
+            if (currentPhase) {
+                lines.push(`### 현재 진행 중`);
+                lines.push(`Phase ${currentPhase.id}: ${currentPhase.name}`);
+            } else if (nextPhase) {
+                lines.push(`### 다음 단계`);
+                lines.push(`\`/weave craft ${nextPhase.id}\` - ${nextPhase.name}`);
+            } else if (stats.progress === 100) {
+                lines.push(`### 🎉 완료!`);
+                lines.push(`모든 Phase가 완료되었습니다.`);
+            }
+        }
+
+        return lines.join('\n');
+    }
+
+    // Legacy single-plan mode
     const plan = await manager.loadPlan();
 
     if (!plan) {

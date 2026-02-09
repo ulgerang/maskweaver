@@ -79,7 +79,7 @@ function getAssetsDir(): string {
   }
 }
 
-function copyDirRecursive(src: string, dest: string, result: InstallResult): void {
+function copyDirRecursive(src: string, dest: string, result: InstallResult, overwrite: boolean = false): void {
   if (!fs.existsSync(src)) return;
 
   if (!fs.existsSync(dest)) {
@@ -93,10 +93,9 @@ function copyDirRecursive(src: string, dest: string, result: InstallResult): voi
     const destPath = path.join(dest, entry.name);
 
     if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, destPath, result);
+      copyDirRecursive(srcPath, destPath, result, overwrite);
     } else {
-      // Only copy if destination doesn't exist (don't overwrite user customizations)
-      if (!fs.existsSync(destPath)) {
+      if (overwrite || !fs.existsSync(destPath)) {
         try {
           fs.copyFileSync(srcPath, destPath);
           result.installed.push(destPath);
@@ -148,11 +147,11 @@ function installAssets(projectDir: string): InstallResult {
     const masksDest = path.join(targetDir, 'masks');
     copyDirRecursive(masksSrc, masksDest, result);
 
-    // Install commands (if any)
+    // Install commands (always overwrite to keep commands up-to-date)
     const commandsSrc = path.join(assetsDir, 'commands');
     const commandsDest = path.join(targetDir, 'commands');
     if (fs.existsSync(commandsSrc)) {
-      copyDirRecursive(commandsSrc, commandsDest, result);
+      copyDirRecursive(commandsSrc, commandsDest, result, true);
     }
   }
 

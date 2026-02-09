@@ -201,7 +201,7 @@ async function handleCraft(
 }
 
 async function handleStatus(basePath: string): Promise<string> {
-    const report = await generateStatusReport();
+    const report = await generateStatusReport(basePath);
 
     // Add global knowledge stats
     const knowledge = new GlobalKnowledge();

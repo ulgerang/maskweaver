@@ -15,6 +15,8 @@ import type { WeavePhase, WeavePlan, PhaseStatus } from './types.js';
 
 const WEAVE_DIR = '.opencode/weave';
 const PLAN_FILE = 'PLAN.yaml';
+const STATE_FILE = 'state.yaml';
+const PLANS_DIR = 'plans';
 
 function getWeaveDir(basePath: string = process.cwd()): string {
     return path.join(basePath, WEAVE_DIR);
@@ -24,8 +26,23 @@ function getPlanPath(basePath: string = process.cwd()): string {
     return path.join(getWeaveDir(basePath), PLAN_FILE);
 }
 
+function getStatePath(basePath: string = process.cwd()): string {
+    return path.join(getWeaveDir(basePath), STATE_FILE);
+}
+
+function getPlansDir(basePath: string = process.cwd()): string {
+    return path.join(getWeaveDir(basePath), PLANS_DIR);
+}
+
 function ensureWeaveDir(basePath: string = process.cwd()): void {
     const dir = getWeaveDir(basePath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+}
+
+function ensurePlansDir(basePath: string = process.cwd()): void {
+    const dir = getPlansDir(basePath);
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -133,18 +150,41 @@ export class PhaseManager {
 
     /**
      * Load existing plan or return null.
+     * Supports multi-plan architecture (state.yaml → plans/) with legacy PLAN.yaml fallback.
      */
     async loadPlan(): Promise<WeavePlan | null> {
-        const planPath = getPlanPath(this.basePath);
+        const { parse } = await import('yaml');
 
+        // 1. Try new multi-plan architecture: state.yaml → plans/{active_plan}.yaml
+        const statePath = getStatePath(this.basePath);
+        if (fs.existsSync(statePath)) {
+            try {
+                const stateContent = fs.readFileSync(statePath, 'utf-8');
+                const state = parse(stateContent);
+                const activePlan = state?.active_plan;
+
+                if (activePlan) {
+                    const planFilePath = path.join(getPlansDir(this.basePath), `${activePlan}.yaml`);
+                    if (fs.existsSync(planFilePath)) {
+                        const content = fs.readFileSync(planFilePath, 'utf-8');
+                        const raw = parse(content);
+                        this.plan = this.rawToPlan(raw);
+                        return this.plan;
+                    }
+                }
+            } catch (e) {
+                console.error('[PhaseManager] Failed to load from state.yaml:', e);
+            }
+        }
+
+        // 2. Legacy fallback: PLAN.yaml
+        const planPath = getPlanPath(this.basePath);
         if (!fs.existsSync(planPath)) {
             return null;
         }
 
         try {
             const content = fs.readFileSync(planPath, 'utf-8');
-            // Simple YAML parsing - in production, use proper yaml library
-            const { parse } = await import('yaml');
             const raw = parse(content);
 
             this.plan = this.rawToPlan(raw);
@@ -157,14 +197,32 @@ export class PhaseManager {
 
     /**
      * Save plan to disk.
+     * If state.yaml exists (new mode): save to plans/{planName}.yaml and update state.yaml.
+     * Otherwise (legacy mode): save to PLAN.yaml.
      */
     async savePlan(plan: WeavePlan): Promise<void> {
         ensureWeaveDir(this.basePath);
+        const { stringify } = await import('yaml');
 
         plan.updatedAt = new Date().toISOString();
         const content = serializePlan(plan);
 
-        fs.writeFileSync(getPlanPath(this.basePath), content, 'utf-8');
+        const statePath = getStatePath(this.basePath);
+        if (fs.existsSync(statePath)) {
+            // New multi-plan mode: save to plans/ directory
+            ensurePlansDir(this.basePath);
+            const planName = this.toPlanFileName(plan.projectName);
+            const planFilePath = path.join(getPlansDir(this.basePath), `${planName}.yaml`);
+            fs.writeFileSync(planFilePath, content, 'utf-8');
+
+            // Update state.yaml with active_plan
+            const stateContent = stringify({ active_plan: planName });
+            fs.writeFileSync(statePath, stateContent, 'utf-8');
+        } else {
+            // Legacy mode: save to PLAN.yaml
+            fs.writeFileSync(getPlanPath(this.basePath), content, 'utf-8');
+        }
+
         this.plan = plan;
     }
 
@@ -357,6 +415,90 @@ export class PhaseManager {
             inProgressPhases: inProgress,
             progress: total > 0 ? Math.round((completed / total) * 100) : 0,
         };
+    }
+
+    /**
+     * Convert project name to a filesystem-safe plan file name.
+     */
+    private toPlanFileName(projectName: string): string {
+        return projectName
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '') || 'unnamed';
+    }
+
+    /**
+     * Load all plans from the plans/ directory.
+     * Returns empty array in legacy mode or if no plans exist.
+     */
+    async loadAllPlans(): Promise<WeavePlan[]> {
+        const plansDir = getPlansDir(this.basePath);
+        if (!fs.existsSync(plansDir)) {
+            // Legacy mode: try loading single PLAN.yaml
+            const legacyPlan = await this.loadPlan();
+            return legacyPlan ? [legacyPlan] : [];
+        }
+
+        const { parse } = await import('yaml');
+        const plans: WeavePlan[] = [];
+
+        try {
+            const files = fs.readdirSync(plansDir).filter(f => f.endsWith('.yaml'));
+            for (const file of files) {
+                try {
+                    const content = fs.readFileSync(path.join(plansDir, file), 'utf-8');
+                    const raw = parse(content);
+                    plans.push(this.rawToPlan(raw));
+                } catch (e) {
+                    console.error(`[PhaseManager] Failed to load plan ${file}:`, e);
+                }
+            }
+        } catch (e) {
+            console.error('[PhaseManager] Failed to scan plans directory:', e);
+        }
+
+        return plans;
+    }
+
+    /**
+     * Get the active plan name from state.yaml.
+     * Returns null in legacy mode or if state.yaml doesn't exist.
+     */
+    async getActivePlanName(): Promise<string | null> {
+        const statePath = getStatePath(this.basePath);
+        if (!fs.existsSync(statePath)) {
+            return null;
+        }
+
+        try {
+            const { parse } = await import('yaml');
+            const content = fs.readFileSync(statePath, 'utf-8');
+            const state = parse(content);
+            return state?.active_plan || null;
+        } catch (e) {
+            console.error('[PhaseManager] Failed to read state.yaml:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Load and return state.yaml content.
+     * Returns null if state.yaml doesn't exist (legacy mode).
+     */
+    async loadState(): Promise<{ active_plan?: string } | null> {
+        const statePath = getStatePath(this.basePath);
+        if (!fs.existsSync(statePath)) {
+            return null;
+        }
+
+        try {
+            const { parse } = await import('yaml');
+            const content = fs.readFileSync(statePath, 'utf-8');
+            return parse(content) || null;
+        } catch (e) {
+            console.error('[PhaseManager] Failed to load state.yaml:', e);
+            return null;
+        }
     }
 
     private rawToPlan(raw: any): WeavePlan {

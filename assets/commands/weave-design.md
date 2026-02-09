@@ -1,56 +1,131 @@
 ---
-name: weave-design
-description: 요구사항 분석 및 Phase 계획 수립
-usage: /weave design [문서 위치 또는 설명]
-examples:
-  - /weave design docs/
-  - /weave design wiki/requirements.md
-  - /weave design 기획 폴더
-  - /weave design README에 있는 요구사항
-  - /weave design 아까 만든 스펙 문서
-  - /weave design 어제 정리해둔 기능 목록
+description: 요구사항 분석 및 Phase 계획 수립 (멀티 플랜)
 ---
 
-# /weave design - 요구사항 분석 및 계획 수립
+# /weave-design - 요구사항 분석 및 계획 수립
 
 ## 개요
 
 유저의 요구사항 문서를 분석하고, Phase별 실행 계획을 수립합니다.
+**멀티 플랜**: 하나의 프로젝트에서 여러 플랜을 동시에 관리할 수 있습니다.
 
 **입력 방식**: 
-- ✅ 정확한 경로: `docs/`, `wiki/spec.md`
-- ✅ 자연어 힌트: `기획 폴더`, `README`, `아까 만든 문서`
+- 정확한 경로: `docs/`, `wiki/spec.md`
+- 자연어 힌트: `기획 폴더`, `README`, `아까 만든 문서`
 
 > AI가 자동으로 프로젝트를 탐색하여 관련 문서를 찾습니다.
 
 **Maskweaver 통합**:
-- 📚 **Memory**: 과거 유사 프로젝트 검색하여 계획 참조
-- 🎭 **Masks**: 모든 분석/설계 단계에서 전문가 마스크 적극 소환
+- **Memory**: 과거 유사 프로젝트 검색하여 계획 참조
+- **Masks**: 아키텍처 분석에 Martin Fowler 마스크 자동 선택
 
 ---
 
-## 🎭 Mask-First Principle (핵심 원칙)
+## 사전 조건
 
-### 원칙: "가면술사는 직접 작업하지 않는다"
-
-당신은 **가면술사(Mask Weaver)**입니다. 당신의 힘은 적절한 전문가를 소환하여 위임하는 것에 있습니다.
-
-> ⚡ **왜 마스크를 최대한 사용해야 하는가?**
-> 
-> 1. **새로운 세션 생성**: 각 마스크 소환(Task)은 새로운 서브에이전트 세션을 만듭니다
-> 2. **컨텍스트 레이어 분리**: 각 세션은 독립된 컨텍스트를 가지므로 주 컨텍스트가 오염되지 않습니다
-> 3. **전략적 판단력 보존**: 가면술사의 작업 기억이 세부사항으로 오염되지 않아 전체 그림을 유지합니다
-> 4. **전문성 극대화**: 각 영역의 최고 전문가가 집중 분석하므로 품질이 향상됩니다
-
-**핵심 규칙**: 가면술사가 직접 처리하는 것은 **경로 해석(RESOLVE)**과 **유저 커뮤니케이션**뿐입니다. 나머지 모든 분석/설계 작업은 마스크를 소환하여 위임합니다.
+`/weave-init`이 실행되어 있어야 합니다.
+실행되지 않았다면 자동으로 init을 먼저 수행합니다:
+1. `.opencode/weave/state.yaml` 존재 여부 확인
+2. 없으면 → `/weave-init` 절차 자동 실행 후 계속 진행
 
 ---
 
-## 🎭 단계별 필수 마스크 소환 가이드
+## Expert Summoning Strategy (Critical)
 
-### Step 0: RESOLVE → 가면술사 직접 처리 ✋
+### Principle: Summon Named Experts for Quality
 
-이 단계만 가면술사가 직접 합니다. 경로 탐색은 당신의 도구를 사용하는 단순 작업입니다.
+You are the **Mask Weaver**. Your power lies in summoning the right expert for the right task. Don't try to do everything yourself — **delegate to specialists**.
+
+---
+
+### 1. Architecture & Design Decisions → Expert Council
+
+For **critical architectural decisions**, summon multiple experts for consultation:
+
+```
+Complex Architecture Decision:
+
+Task(dummy-human):
+  Mask: Martin Fowler (Enterprise Architecture)
+  Task: "Analyze these requirements and propose a layer structure,
+         key components, and design patterns to use."
+
+Task(dummy-human):
+  Mask: Linus Torvalds (System Performance)
+  Task: "Review the proposed architecture for performance bottlenecks
+         and scalability concerns."
+
+→ Mask Weaver synthesizes both perspectives into final decision.
+```
+
+**Why This Works**:
+- Each expert focuses on their domain of excellence
+- You maintain strategic oversight without context pollution
+- Multiple perspectives prevent blind spots
+
+---
+
+### 2. Technology Choices → Squad Parallel Analysis
+
+For **important technology selections** (framework, database, etc.):
+
+```
+Mask Weaver:
+1. squad start → "Optimal Tech Stack Decision"
+2. squad squad (arch-squad) → "Martin Fowler: Maintainability analysis"
+3. squad squad (perf-squad) → "Linus Torvalds: Performance analysis"
+4. squad squad (dx-squad) → "Dan Abramov: Developer experience analysis"
+
+→ Collect results → Weigh trade-offs → Final decision
+```
+
+---
+
+### 3. When to Summon vs Handle Directly
+
+| Situation | Action |
+|-----------|--------|
+| Reading & summarizing requirements | Handle directly |
+| Obvious tech stack (project already decided) | Handle directly |
+| Architecture trade-offs with long-term impact | **Summon Martin Fowler** |
+| Performance-critical design | **Summon Linus Torvalds** |
+| Multiple valid approaches, need comparison | **Squad council** |
+
+> **Rule of Thumb**: If the decision will be hard to reverse later, summon experts. If it's tactical, handle it yourself.
+
+---
+
+## 실행 흐름
+
+```
+0. INIT CHECK (weave 초기화 확인)
+   ↓
+1. RESOLVE (입력 해석 → 실제 경로 찾기)
+   ↓
+2. INTAKE (문서 분석)
+   ↓
+3. CLARIFY (불명확한 부분 질문)
+   ↓
+4. PLAN (계획서 제시 + 플랜 이름 제안)
+   ↓
+5. FEEDBACK (유저 피드백 → 수정)
+   ↓
+6. APPROVE (승인 시 플랜 파일 생성 + 활성 플랜 설정)
+```
+
+---
+
+## 단계별 상세
+
+### Step 0: INIT CHECK
+
+```
+.opencode/weave/state.yaml 존재?
+  ├─ YES → 계속 진행
+  └─ NO → /weave-init 자동 실행 후 계속
+```
+
+### Step 1: RESOLVE (경로 해석)
 
 **입력 유형별 처리**:
 
@@ -69,181 +144,61 @@ examples:
 3. 최근 수정 시간 고려 (시간 힌트가 있는 경우)
 4. 후보가 여러 개면 유저에게 확인
 
-**출력 (후보가 여러 개일 때)**:
-```markdown
-## 🔍 문서를 찾고 있습니다
+---
 
-"기획 폴더"로 검색한 결과:
+### Step 2: INTAKE
 
-1. 📁 `docs/` - 5개 파일 (가장 유력)
-2. 📁 `wiki/planning/` - 3개 파일
-3. 📄 `SPEC.md` - 루트에 있는 스펙 문서
-
-어떤 것을 분석할까요? (번호 또는 "전부")
-```
+**수행 작업**:
+1. 해석된 경로의 모든 문서 읽기
+2. 핵심 기능 추출
+3. 기술적 요구사항 식별
+4. 과거 유사 프로젝트 검색 (Memory 시스템)
 
 ---
 
-### Step 1: INTAKE → 🎭 마스크 소환 (필수)
+### Step 3: CLARIFY
 
-요구사항 문서 분석은 **반드시 전문가 마스크를 소환**하여 수행합니다.
-
-**필수 소환 마스크**: 도메인별 적합한 전문가
-
-```
-📄 요구사항 분석:
-
-Task(dummy-human):
-  Mask: Martin Fowler (Requirements Analysis)
-  Task: "다음 요구사항 문서들을 읽고 분석해줘:
-         [문서 경로 목록]
-         
-         분석 결과를 다음 형식으로 정리:
-         1. 핵심 기능 목록 (우선순위순)
-         2. 도메인 용어 사전
-         3. 기술적 요구사항 (Frontend/Backend/Database)
-         4. 비기능적 요구사항 (성능, 보안, 확장성)
-         5. 불명확한 부분 목록
-         6. 잠재적 위험 요소"
-```
-
-**프로젝트 유형별 마스크 선택**:
-
-| 프로젝트 유형 | 분석 마스크 | 이유 |
-|-------------|-----------|------|
-| 웹 애플리케이션 | Martin Fowler | 엔터프라이즈 패턴, 계층 구조 |
-| 시스템/인프라 | Linus Torvalds | 성능, 확장성 관점 |
-| ML/AI 프로젝트 | Andrew Ng | 데이터 파이프라인, 모델 아키텍처 |
-| 프론트엔드 중심 | Dan Abramov | 상태 관리, UX 패턴 |
-| 테스트/품질 중심 | Kent Beck | 테스트 전략, 품질 메트릭 |
+불명확한 부분을 유저에게 질문합니다.
 
 ---
 
-### Step 2: CLARIFY → 🎭 마스크 소환 (필수)
+### Step 4: PLAN
 
-불명확한 부분 식별도 **전문가에게 위임**합니다. INTAKE 분석 결과를 바탕으로 추가 마스크를 소환합니다.
+**Phase 크기 기준**:
+- 한 Phase = 반나절 ~ 하루 작업량
+- 끝나면 유저가 뭔가 "해볼 수 있어야" 함
 
-```
-❓ 요구사항 불명확점 분석:
-
-Task(dummy-human):
-  Mask: Robert C. Martin (Clean Architecture)
-  Task: "INTAKE 분석 결과를 검토하고:
-         1. 아키텍처적으로 불명확한 부분 식별
-         2. 기술 선택이 필요한 부분 제시
-         3. 각 선택지의 트레이드오프 분석
-         4. 유저에게 확인해야 할 질문 목록 생성
-         
-         특히 '나중에 바꾸기 어려운 결정'을 모두 찾아줘."
-```
-
-**질문 리스트를 유저에게 제시** (이건 가면술사가 직접):
-```markdown
-## ❓ 확인이 필요합니다
-
-### 1. [질문 제목]
-- Option A: [...]
-- Option B: [...]
-
----
-답변해주시면 계획서를 만들겠습니다.
-```
-
----
-
-### Step 3: PLAN → 🎭 다중 마스크 소환 (필수)
-
-계획 수립은 **가장 많은 마스크를 소환해야 하는 단계**입니다.
-
-#### 3-1. 아키텍처 설계 🎭
-
-```
-Task(dummy-human):
-  Mask: Martin Fowler (Enterprise Architecture)
-  Task: "요구사항 분석 결과와 유저 답변을 바탕으로:
-         1. 전체 아키텍처 설계 (레이어 구조, 핵심 컴포넌트)
-         2. 사용할 디자인 패턴
-         3. 데이터 모델 초안
-         4. API 설계 방향"
-```
-
-#### 3-2. 아키텍처 리뷰 🎭
-
-```
-Task(dummy-human):
-  Mask: Linus Torvalds (System Performance)
-  Task: "Martin Fowler가 설계한 아키텍처를 검토하고:
-         1. 성능 병목 지점 식별
-         2. 확장성 문제 지적
-         3. 과도한 추상화 지적
-         4. 실용적 대안 제시"
-```
-
-#### 3-3. 테스트 전략 수립 🎭
-
-```
-Task(dummy-human):
-  Mask: Kent Beck (TDD Strategy)
-  Task: "이 프로젝트의 테스트 전략을 수립해줘:
-         1. 테스트 피라미드 구조 (Unit/Integration/E2E 비율)
-         2. 각 Phase별 필수 테스트 항목
-         3. TDD를 적용할 핵심 모듈 식별
-         4. 테스트 인프라 요구사항"
-```
-
-#### 3-4. Phase 분해 🎭
-
-```
-Task(dummy-human):
-  Mask: 프로젝트 매니저 (Agile PM)
-  Task: "아키텍처 설계와 테스트 전략을 통합하여:
-         1. 전체 작업을 Phase로 분해 (반나절~하루 단위)
-         2. 각 Phase의 완료 조건 정의
-         3. Phase 간 의존성 식별
-         4. 각 Phase에서 사용할 마스크 사전 배정
-         5. 리스크가 높은 Phase 식별 및 대응 방안"
-```
-
-#### 가면술사: 통합 및 제시 ✋
-
-위 4개 마스크의 결과를 **가면술사가 통합**하여 유저에게 제시합니다:
-
+**플랜 이름 제안**:
+계획서와 함께 **플랜 이름(kebab-case)**을 제안합니다:
 ```markdown
 ## 📋 실행 계획서
+
+**플랜 이름**: `emotion-diary` (변경 가능)
 
 ### 비전
 [전체 목표 요약]
 
-### 아키텍처 (변경 가능)
-- Frontend: [...]
-- Backend: [...]
-- Note: 진행하면서 조정될 수 있습니다
-
-### 🎭 마스크 전문가 합의
-- **Martin Fowler**: [아키텍처 핵심 의견]
-- **Linus Torvalds**: [성능 관련 리뷰 의견]
-- **Kent Beck**: [테스트 전략 요약]
-
 ### Phase 계획
-
-| Phase | 이름 | 완료 조건 | 예상 시간 | 배정 마스크 |
-|-------|------|----------|----------|-----------|
-| P1 | [...] | [...] | 2-3시간 | 🎭 Kent Beck, Dan Abramov |
-| P2 | [...] | [...] | 2-3시간 | 🎭 Martin Fowler, Linus Torvalds |
+| Phase | 이름 | 완료 조건 | 예상 시간 |
+|-------|------|----------|----------|
+| P1 | [...] | [...] | 2-3시간 |
+| P2 | [...] | [...] | 2-3시간 |
 
 ---
-이 계획이 괜찮으세요? 수정이 필요하면 말씀해주세요.
+이 계획이 괜찮으세요? 플랜 이름을 바꾸고 싶다면 말씀해주세요.
 ```
 
 ---
 
-### Step 4: APPROVE → 가면술사 직접 ✋
+### Step 5: APPROVE
 
-**생성 파일**: `.opencode/weave/PLAN.yaml`
+**플랜 파일 생성**: `.opencode/weave/plans/{plan-name}.yaml`
 
 ```yaml
-project_name: "[프로젝트명]"
+plan_name: "emotion-diary"
+project_name: "감정 일기 앱"
 created_at: "2026-02-06"
+status: "active"     # active | paused | completed | archived
 
 vision: |
   [전체 비전]
@@ -253,70 +208,58 @@ architecture:
   backend: "[...]"
   database: "[...]"
 
-expert_review:
-  architecture: "Martin Fowler - [핵심 의견]"
-  performance: "Linus Torvalds - [핵심 의견]"
-  testing: "Kent Beck - [핵심 의견]"
-
 phases:
   - id: "P1"
     name: "[Phase 이름]"
-    status: "pending"
+    status: "pending"    # pending | in_progress | completed
     done_when: "[완료 조건]"
-    assigned_masks:
-      - "Kent Beck"
-      - "Dan Abramov"
+    started_at: null
+    completed_at: null
+    masks_used: []
     checklist:
       - "[체크 항목 1]"
       - "[체크 항목 2]"
     tasks: []
 ```
 
+**state.yaml 업데이트**:
+
+```yaml
+active_plan: "emotion-diary"
+```
+
 **완료 메시지**:
 ```markdown
-✅ 계획이 승인되었습니다!
+✅ 플랜이 승인되었습니다!
 
-📁 생성된 파일: `.opencode/weave/PLAN.yaml`
-
-### 🎭 사용된 전문가 마스크
-- Martin Fowler (아키텍처 설계)
-- Linus Torvalds (성능 리뷰)
-- Kent Beck (테스트 전략)
-- PM (Phase 분해)
+📁 생성된 파일: `.opencode/weave/plans/emotion-diary.yaml`
+📌 활성 플랜으로 설정됨
 
 ### 다음 단계
 Phase 1을 시작하려면:
-/weave craft P1
+`/weave-craft P1`
 ```
 
 ---
 
-## 실행 흐름 요약
+## 기존 플랜이 있는 경우
 
-```
-0. RESOLVE (입력 해석)          ← ✋ 가면술사 직접
-   ↓
-1. INTAKE (문서 분석)           ← 🎭 마스크 소환 (1개)
-   ↓
-2. CLARIFY (불명확 분석)        ← 🎭 마스크 소환 (1개) + ✋ 유저 질문
-   ↓
-3. PLAN                        ← 🎭 마스크 소환 (3~4개)
-   ├─ 아키텍처 설계              🎭 Martin Fowler
-   ├─ 아키텍처 리뷰              🎭 Linus Torvalds  
-   ├─ 테스트 전략                🎭 Kent Beck
-   └─ Phase 분해                 🎭 PM
-   ↓
-4. APPROVE (승인 → PLAN.yaml)  ← ✋ 가면술사 직접
-```
+활성 플랜이 이미 존재하면:
+```markdown
+ℹ️ 현재 활성 플랜: `todo-app` (P2 진행 중)
 
-> 📊 **마스크 사용 목표**: 최소 5~6회 마스크 소환 (INTAKE 1 + CLARIFY 1 + PLAN 3~4)
+새 플랜을 추가하면 기존 플랜은 유지되고, 새 플랜이 활성 플랜이 됩니다.
+기존 플랜으로 돌아가려면: `/weave-switch todo-app`
+
+계속 진행할까요?
+```
 
 ---
 
 ## 주의사항
 
-1. **마스크를 아끼지 마라**: 조금이라도 전문성이 필요하면 소환하라. 각 소환은 새 세션을 만들어 컨텍스트를 보존한다.
-2. **Phase는 작게**: 큰 Phase는 분할
-3. **마스크 결과를 통합하라**: 여러 마스크의 결과를 가면술사가 종합하는 것이 핵심 역할
+1. **Phase는 작게**: 큰 Phase는 분할
+2. **복잡한 분석은 위임**: Task(dummy-human)으로 전문가 위임
+3. **테스트 가능해야**: 각 Phase 끝에 유저가 확인할 수 있어야
 4. **아키텍처는 유연하게**: "변경 가능"을 명시
-5. **직접 분석하지 마라**: "내가 빨리 할 수 있을 것 같은데..."는 안티패턴. 전문가에게 위임하라.
+5. **플랜 이름은 kebab-case**: 파일명이 되므로 영문 소문자, 하이픈만 사용

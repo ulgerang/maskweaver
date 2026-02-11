@@ -163,22 +163,28 @@ async function handleCraft(
     basePath: string
 ): Promise<string> {
     const { phaseId, projectType } = args;
+    const manager = getPhaseManager(basePath);
 
     if (!phaseId) {
         // Get next phase
-        const manager = getPhaseManager(basePath);
         await manager.loadPlan();
+        const recoveryMessages = manager.getRecoveryMessages();
         const nextPhase = manager.getNextPhase();
+
+        // Prepend recovery warnings if any
+        const prefix = recoveryMessages.length > 0
+            ? `### ⚠️ YAML 자동 복구\n${recoveryMessages.map(m => `- ${m}`).join('\n')}\n\n`
+            : '';
 
         if (!nextPhase) {
             const stats = manager.getStats();
             if (stats.progress === 100) {
-                return '🎉 모든 Phase가 완료되었습니다!';
+                return prefix + '🎉 모든 Phase가 완료되었습니다!';
             }
-            return 'Error: 실행할 Phase가 없습니다. 먼저 /weave design으로 계획을 세워주세요.';
+            return prefix + 'Error: 실행할 Phase가 없습니다. 먼저 /weave design으로 계획을 세워주세요.';
         }
 
-        return `다음 Phase: ${nextPhase.id} - ${nextPhase.name}\n\n실행하려면: weave craft ${nextPhase.id}`;
+        return prefix + `다음 Phase: ${nextPhase.id} - ${nextPhase.name}\n\n실행하려면: weave craft ${nextPhase.id}`;
     }
 
     // Execute the phase
@@ -201,6 +207,11 @@ async function handleCraft(
 }
 
 async function handleStatus(basePath: string): Promise<string> {
+    const manager = getPhaseManager(basePath);
+    // Pre-load plan to capture recovery messages
+    await manager.loadPlan();
+    const recoveryMessages = manager.getRecoveryMessages();
+
     const report = await generateStatusReport(basePath);
 
     // Add global knowledge stats
@@ -208,7 +219,18 @@ async function handleStatus(basePath: string): Promise<string> {
     await knowledge.init();
     const stats = await knowledge.getStats();
 
-    const lines: string[] = [report, ''];
+    const lines: string[] = [];
+
+    // Show recovery warnings at the top
+    if (recoveryMessages.length > 0) {
+        lines.push('### ⚠️ YAML 자동 복구');
+        for (const msg of recoveryMessages) {
+            lines.push(`- ${msg}`);
+        }
+        lines.push('');
+    }
+
+    lines.push(report, '');
     lines.push('### 🧠 글로벌 지식베이스');
     lines.push(`- 총 트러블슈팅 기록: ${stats.totalEntries}개`);
     if (stats.topProjectTypes.length > 0) {

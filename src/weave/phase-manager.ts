@@ -49,6 +49,182 @@ function ensurePlansDir(basePath: string = process.cwd()): void {
 }
 
 // ============================================================================
+// Safe File I/O with Backup & Recovery
+// ============================================================================
+
+/**
+ * Atomically write a file with backup.
+ * 1. If target exists, copy it to target.bak
+ * 2. Write content to target.tmp
+ * 3. Rename target.tmp → target (atomic on most OS)
+ * Falls back to direct write if rename fails (e.g., cross-device on Windows).
+ */
+function safeWriteFile(filePath: string, content: string): void {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+
+    // Step 1: Backup existing file
+    if (fs.existsSync(filePath)) {
+        try {
+            fs.copyFileSync(filePath, filePath + '.bak');
+        } catch (e) {
+            console.error(`[PhaseManager] Warning: Failed to create backup for ${path.basename(filePath)}:`, e);
+        }
+    }
+
+    // Step 2-3: Write to .tmp then rename (atomic)
+    const tmpPath = filePath + '.tmp';
+    try {
+        fs.writeFileSync(tmpPath, content, 'utf-8');
+        fs.renameSync(tmpPath, filePath);
+    } catch (e) {
+        // Fallback: direct write (rename can fail on some Windows configs)
+        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+        fs.writeFileSync(filePath, content, 'utf-8');
+    }
+}
+
+/**
+ * Safely read and parse a YAML file with auto-recovery.
+ * 
+ * Recovery chain:
+ * 1. Try reading the file normally
+ * 2. If parse fails, try the .bak backup file
+ * 3. If .bak succeeds, auto-restore the file from backup
+ * 4. Returns { data, recovered, error } indicating what happened
+ */
+async function safeReadYaml<T = any>(filePath: string): Promise<{
+    data: T | null;
+    recovered: boolean;
+    error?: string;
+}> {
+    const { parse } = await import('yaml');
+    const fileName = path.basename(filePath);
+
+    // File doesn't exist at all
+    if (!fs.existsSync(filePath)) {
+        return { data: null, recovered: false };
+    }
+
+    // Try reading the main file
+    try {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        if (!content.trim()) {
+            throw new Error('File is empty');
+        }
+        const data = parse(content);
+        return { data, recovered: false };
+    } catch (primaryError) {
+        const errMsg = primaryError instanceof Error ? primaryError.message : String(primaryError);
+        console.error(`[PhaseManager] YAML parse failed for ${fileName}: ${errMsg}`);
+
+        // Try .bak backup
+        const bakPath = filePath + '.bak';
+        if (fs.existsSync(bakPath)) {
+            try {
+                const bakContent = fs.readFileSync(bakPath, 'utf-8');
+                if (!bakContent.trim()) {
+                    throw new Error('Backup file is empty');
+                }
+                const data = parse(bakContent);
+
+                // Auto-restore from backup
+                console.error(`[PhaseManager] Auto-recovered ${fileName} from backup`);
+                try {
+                    // Save corrupted file for debugging
+                    const corruptedPath = filePath + '.corrupted';
+                    fs.copyFileSync(filePath, corruptedPath);
+                    // Restore from backup
+                    fs.copyFileSync(bakPath, filePath);
+                } catch (restoreErr) {
+                    console.error(`[PhaseManager] Warning: Could not auto-restore file:`, restoreErr);
+                }
+
+                return {
+                    data,
+                    recovered: true,
+                    error: `${fileName} was corrupted and auto-recovered from backup. Corrupted file saved as ${fileName}.corrupted`,
+                };
+            } catch (bakError) {
+                const bakErrMsg = bakError instanceof Error ? bakError.message : String(bakError);
+                console.error(`[PhaseManager] Backup ${fileName}.bak also failed: ${bakErrMsg}`);
+                return {
+                    data: null,
+                    recovered: false,
+                    error: `${fileName} is corrupted and backup is also invalid. Manual recovery needed. Error: ${errMsg}`,
+                };
+            }
+        }
+
+        // No backup available
+        return {
+            data: null,
+            recovered: false,
+            error: `${fileName} is corrupted (no backup available). Error: ${errMsg}`,
+        };
+    }
+}
+
+/**
+ * Validate that raw parsed YAML has the expected plan structure.
+ * Returns a sanitized object or null if unrecoverable.
+ */
+function validatePlanStructure(raw: any): any | null {
+    if (!raw || typeof raw !== 'object') {
+        return null;
+    }
+
+    // Ensure phases is an array
+    if (raw.phases && !Array.isArray(raw.phases)) {
+        console.error('[PhaseManager] Invalid phases field (not an array), resetting to empty');
+        raw.phases = [];
+    }
+
+    // Ensure each phase has required fields
+    if (Array.isArray(raw.phases)) {
+        raw.phases = raw.phases.filter((p: any) => {
+            if (!p || typeof p !== 'object') return false;
+            if (!p.id || !p.name) {
+                console.error(`[PhaseManager] Skipping invalid phase entry (missing id/name)`);
+                return false;
+            }
+            // Ensure tasks is an array
+            if (p.tasks && !Array.isArray(p.tasks)) {
+                p.tasks = [];
+            }
+            // Ensure checklist is an array
+            if (p.checklist && !Array.isArray(p.checklist)) {
+                p.checklist = [];
+            }
+            return true;
+        });
+    }
+
+    return raw;
+}
+
+/**
+ * Escape a string value for safe YAML serialization.
+ * Uses double-quoted YAML string escaping.
+ */
+function yamlEscapeString(value: string): string {
+    if (!value) return '""';
+    // If value contains characters that could break YAML, use double-quoted escaping
+    if (/[\n\r\t"\\:#{}\[\],&*?|>!%@`]/.test(value) || value.trim() !== value) {
+        return '"' + value
+            .replace(/\\/g, '\\\\')
+            .replace(/"/g, '\\"')
+            .replace(/\n/g, '\\n')
+            .replace(/\r/g, '\\r')
+            .replace(/\t/g, '\\t')
+            + '"';
+    }
+    return `"${value}"`;
+}
+
+// ============================================================================
 // YAML Serialization (Simple)
 // ============================================================================
 
@@ -58,20 +234,20 @@ function serializePlan(plan: WeavePlan): string {
     lines.push(`# Weave Plan - ${plan.projectName}`);
     lines.push(`# Generated by Maskweaver Weave`);
     lines.push('');
-    lines.push(`project_name: "${plan.projectName}"`);
+    lines.push(`project_name: ${yamlEscapeString(plan.projectName)}`);
     lines.push(`created_at: "${plan.createdAt}"`);
     lines.push(`updated_at: "${plan.updatedAt}"`);
     lines.push('');
     lines.push('vision: |');
-    for (const line of plan.vision.split('\n')) {
+    for (const line of (plan.vision || '').split('\n')) {
         lines.push(`  ${line}`);
     }
     lines.push('');
     lines.push('architecture:');
-    if (plan.architecture.frontend) lines.push(`  frontend: "${plan.architecture.frontend}"`);
-    if (plan.architecture.backend) lines.push(`  backend: "${plan.architecture.backend}"`);
-    if (plan.architecture.database) lines.push(`  database: "${plan.architecture.database}"`);
-    if (plan.architecture.notes) lines.push(`  notes: "${plan.architecture.notes}"`);
+    if (plan.architecture?.frontend) lines.push(`  frontend: ${yamlEscapeString(plan.architecture.frontend)}`);
+    if (plan.architecture?.backend) lines.push(`  backend: ${yamlEscapeString(plan.architecture.backend)}`);
+    if (plan.architecture?.database) lines.push(`  database: ${yamlEscapeString(plan.architecture.database)}`);
+    if (plan.architecture?.notes) lines.push(`  notes: ${yamlEscapeString(plan.architecture.notes)}`);
     lines.push('');
 
     if (plan.currentPhase) {
@@ -80,11 +256,11 @@ function serializePlan(plan: WeavePlan): string {
     }
 
     lines.push('phases:');
-    for (const phase of plan.phases) {
+    for (const phase of (plan.phases || [])) {
         lines.push(`  - id: "${phase.id}"`);
-        lines.push(`    name: "${phase.name}"`);
+        lines.push(`    name: ${yamlEscapeString(phase.name)}`);
         lines.push(`    status: "${phase.status}"`);
-        lines.push(`    done_when: "${phase.doneWhen}"`);
+        lines.push(`    done_when: ${yamlEscapeString(phase.doneWhen)}`);
 
         if (phase.estimatedHours) {
             lines.push(`    estimated_hours: ${phase.estimatedHours}`);
@@ -100,25 +276,25 @@ function serializePlan(plan: WeavePlan): string {
         }
 
         lines.push('    checklist:');
-        for (const item of phase.checklist) {
-            lines.push(`      - "${item}"`);
+        for (const item of (phase.checklist || [])) {
+            lines.push(`      - ${yamlEscapeString(item)}`);
         }
 
         lines.push('    tasks:');
-        for (const task of phase.tasks) {
+        for (const task of (phase.tasks || [])) {
             lines.push(`      - id: "${task.id}"`);
-            lines.push(`        name: "${task.name}"`);
+            lines.push(`        name: ${yamlEscapeString(task.name)}`);
             lines.push(`        status: "${task.status}"`);
-            lines.push(`        retry_count: ${task.retryCount}`);
-            lines.push(`        max_retries: ${task.maxRetries}`);
+            lines.push(`        retry_count: ${task.retryCount ?? 0}`);
+            lines.push(`        max_retries: ${task.maxRetries ?? 5}`);
             if (task.testCase) {
-                lines.push(`        test_case: "${task.testCase}"`);
+                lines.push(`        test_case: ${yamlEscapeString(task.testCase)}`);
             }
             if (task.maskUsed) {
-                lines.push(`        mask_used: "${task.maskUsed}"`);
+                lines.push(`        mask_used: ${yamlEscapeString(task.maskUsed)}`);
             }
             if (task.lastError) {
-                lines.push(`        last_error: "${task.lastError.replace(/"/g, '\\"')}"`);
+                lines.push(`        last_error: ${yamlEscapeString(task.lastError)}`);
             }
         }
 
@@ -127,7 +303,7 @@ function serializePlan(plan: WeavePlan): string {
         }
 
         if (phase.masksUsed && phase.masksUsed.length > 0) {
-            lines.push(`    masks_used: [${phase.masksUsed.map(m => `"${m}"`).join(', ')}]`);
+            lines.push(`    masks_used: [${phase.masksUsed.map(m => yamlEscapeString(m)).join(', ')}]`);
         }
 
         lines.push('');
@@ -143,60 +319,93 @@ function serializePlan(plan: WeavePlan): string {
 export class PhaseManager {
     private basePath: string;
     private plan: WeavePlan | null = null;
+    /** Recovery messages from the last loadPlan() call. */
+    private _lastRecoveryMessages: string[] = [];
 
     constructor(basePath: string = process.cwd()) {
         this.basePath = basePath;
     }
 
     /**
+     * Get recovery messages from the last loadPlan() call.
+     * Returns empty array if no recovery was needed.
+     */
+    getRecoveryMessages(): string[] {
+        return this._lastRecoveryMessages;
+    }
+
+    /**
      * Load existing plan or return null.
      * Supports multi-plan architecture (state.yaml → plans/) with legacy PLAN.yaml fallback.
+     * Auto-recovers from .bak backup when YAML is corrupted.
      */
     async loadPlan(): Promise<WeavePlan | null> {
-        const { parse } = await import('yaml');
+        // Track recovery messages for user-facing reporting
+        const recoveryMessages: string[] = [];
 
         // 1. Try new multi-plan architecture: state.yaml → plans/{active_plan}.yaml
         const statePath = getStatePath(this.basePath);
         if (fs.existsSync(statePath)) {
-            try {
-                const stateContent = fs.readFileSync(statePath, 'utf-8');
-                const state = parse(stateContent);
-                const activePlan = state?.active_plan;
+            const stateResult = await safeReadYaml<{ active_plan?: string }>(statePath);
+            if (stateResult.recovered && stateResult.error) {
+                recoveryMessages.push(stateResult.error);
+            }
 
-                if (activePlan) {
-                    const planFilePath = path.join(getPlansDir(this.basePath), `${activePlan}.yaml`);
-                    if (fs.existsSync(planFilePath)) {
-                        const content = fs.readFileSync(planFilePath, 'utf-8');
-                        const raw = parse(content);
-                        this.plan = this.rawToPlan(raw);
+            const activePlan = stateResult.data?.active_plan;
+            if (activePlan) {
+                const planFilePath = path.join(getPlansDir(this.basePath), `${activePlan}.yaml`);
+                const planResult = await safeReadYaml(planFilePath);
+                if (planResult.recovered && planResult.error) {
+                    recoveryMessages.push(planResult.error);
+                }
+
+                if (planResult.data) {
+                    const validated = validatePlanStructure(planResult.data);
+                    if (validated) {
+                        this.plan = this.rawToPlan(validated);
+                        this._lastRecoveryMessages = recoveryMessages;
                         return this.plan;
                     }
                 }
-            } catch (e) {
-                console.error('[PhaseManager] Failed to load from state.yaml:', e);
+            }
+
+            // If state.yaml existed but we couldn't load a plan, report the error
+            if (stateResult.error && !stateResult.recovered) {
+                recoveryMessages.push(stateResult.error);
             }
         }
 
         // 2. Legacy fallback: PLAN.yaml
         const planPath = getPlanPath(this.basePath);
         if (!fs.existsSync(planPath)) {
+            this._lastRecoveryMessages = recoveryMessages;
             return null;
         }
 
-        try {
-            const content = fs.readFileSync(planPath, 'utf-8');
-            const raw = parse(content);
-
-            this.plan = this.rawToPlan(raw);
-            return this.plan;
-        } catch (e) {
-            console.error('[PhaseManager] Failed to load plan:', e);
-            return null;
+        const planResult = await safeReadYaml(planPath);
+        if (planResult.recovered && planResult.error) {
+            recoveryMessages.push(planResult.error);
         }
+
+        if (planResult.data) {
+            const validated = validatePlanStructure(planResult.data);
+            if (validated) {
+                this.plan = this.rawToPlan(validated);
+                this._lastRecoveryMessages = recoveryMessages;
+                return this.plan;
+            }
+        }
+
+        if (planResult.error) {
+            recoveryMessages.push(planResult.error);
+        }
+
+        this._lastRecoveryMessages = recoveryMessages;
+        return null;
     }
 
     /**
-     * Save plan to disk.
+     * Save plan to disk with atomic writes and automatic backup.
      * If state.yaml exists (new mode): save to plans/{planName}.yaml and update state.yaml.
      * Otherwise (legacy mode): save to PLAN.yaml.
      */
@@ -213,14 +422,14 @@ export class PhaseManager {
             ensurePlansDir(this.basePath);
             const planName = this.toPlanFileName(plan.projectName);
             const planFilePath = path.join(getPlansDir(this.basePath), `${planName}.yaml`);
-            fs.writeFileSync(planFilePath, content, 'utf-8');
+            safeWriteFile(planFilePath, content);
 
             // Update state.yaml with active_plan
             const stateContent = stringify({ active_plan: planName });
-            fs.writeFileSync(statePath, stateContent, 'utf-8');
+            safeWriteFile(statePath, stateContent);
         } else {
             // Legacy mode: save to PLAN.yaml
-            fs.writeFileSync(getPlanPath(this.basePath), content, 'utf-8');
+            safeWriteFile(getPlanPath(this.basePath), content);
         }
 
         this.plan = plan;
@@ -430,6 +639,7 @@ export class PhaseManager {
     /**
      * Load all plans from the plans/ directory.
      * Returns empty array in legacy mode or if no plans exist.
+     * Auto-recovers corrupted plan files from backups.
      */
     async loadAllPlans(): Promise<WeavePlan[]> {
         const plansDir = getPlansDir(this.basePath);
@@ -439,18 +649,23 @@ export class PhaseManager {
             return legacyPlan ? [legacyPlan] : [];
         }
 
-        const { parse } = await import('yaml');
         const plans: WeavePlan[] = [];
 
         try {
-            const files = fs.readdirSync(plansDir).filter(f => f.endsWith('.yaml'));
+            const files = fs.readdirSync(plansDir).filter(f => f.endsWith('.yaml') && !f.endsWith('.bak') && !f.endsWith('.tmp') && !f.endsWith('.corrupted'));
             for (const file of files) {
-                try {
-                    const content = fs.readFileSync(path.join(plansDir, file), 'utf-8');
-                    const raw = parse(content);
-                    plans.push(this.rawToPlan(raw));
-                } catch (e) {
-                    console.error(`[PhaseManager] Failed to load plan ${file}:`, e);
+                const filePath = path.join(plansDir, file);
+                const result = await safeReadYaml(filePath);
+                if (result.recovered) {
+                    console.error(`[PhaseManager] Auto-recovered plan ${file} from backup`);
+                }
+                if (result.data) {
+                    const validated = validatePlanStructure(result.data);
+                    if (validated) {
+                        plans.push(this.rawToPlan(validated));
+                    }
+                } else if (result.error) {
+                    console.error(`[PhaseManager] Skipping unrecoverable plan ${file}: ${result.error}`);
                 }
             }
         } catch (e) {
@@ -463,6 +678,7 @@ export class PhaseManager {
     /**
      * Get the active plan name from state.yaml.
      * Returns null in legacy mode or if state.yaml doesn't exist.
+     * Auto-recovers from backup if corrupted.
      */
     async getActivePlanName(): Promise<string | null> {
         const statePath = getStatePath(this.basePath);
@@ -470,20 +686,17 @@ export class PhaseManager {
             return null;
         }
 
-        try {
-            const { parse } = await import('yaml');
-            const content = fs.readFileSync(statePath, 'utf-8');
-            const state = parse(content);
-            return state?.active_plan || null;
-        } catch (e) {
-            console.error('[PhaseManager] Failed to read state.yaml:', e);
-            return null;
+        const result = await safeReadYaml<{ active_plan?: string }>(statePath);
+        if (result.recovered) {
+            console.error(`[PhaseManager] Auto-recovered state.yaml from backup`);
         }
+        return result.data?.active_plan || null;
     }
 
     /**
      * Load and return state.yaml content.
      * Returns null if state.yaml doesn't exist (legacy mode).
+     * Auto-recovers from backup if corrupted.
      */
     async loadState(): Promise<{ active_plan?: string } | null> {
         const statePath = getStatePath(this.basePath);
@@ -491,14 +704,11 @@ export class PhaseManager {
             return null;
         }
 
-        try {
-            const { parse } = await import('yaml');
-            const content = fs.readFileSync(statePath, 'utf-8');
-            return parse(content) || null;
-        } catch (e) {
-            console.error('[PhaseManager] Failed to load state.yaml:', e);
-            return null;
+        const result = await safeReadYaml<{ active_plan?: string }>(statePath);
+        if (result.recovered) {
+            console.error(`[PhaseManager] Auto-recovered state.yaml from backup`);
         }
+        return result.data || null;
     }
 
     private rawToPlan(raw: any): WeavePlan {

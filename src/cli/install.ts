@@ -19,7 +19,9 @@ import { VERSION } from "../version.js";
 // Constants
 // ============================================================================
 
-const PLUGIN_NAME = "@maskweaver/plugin";
+const PLUGIN_NAME = "maskweaver";
+const LEGACY_PLUGIN_NAMES = ["maskweaver/plugin", "@maskweaver/plugin"] as const;
+const ALL_PLUGIN_NAMES = [PLUGIN_NAME, ...LEGACY_PLUGIN_NAMES] as const;
 const CONFIG_NAME = "opencode.json";
 
 // ANSI Colors
@@ -101,11 +103,38 @@ function writeConfig(configPath: string, config: any) {
   }
 }
 
-function isPluginInstalled(config: any): boolean {
+function getInstalledPluginEntries(config: any): string[] {
   if (!config.plugin || !Array.isArray(config.plugin)) {
-    return false;
+    return [];
   }
-  return config.plugin.includes(PLUGIN_NAME);
+  return config.plugin.filter((plugin: string) =>
+    ALL_PLUGIN_NAMES.includes(plugin as (typeof ALL_PLUGIN_NAMES)[number])
+  );
+}
+
+function isPluginInstalled(config: any): boolean {
+  return getInstalledPluginEntries(config).length > 0;
+}
+
+function normalizePluginEntries(config: any): { migratedFrom: string[]; changed: boolean } {
+  if (!config.plugin || !Array.isArray(config.plugin)) {
+    return { migratedFrom: [], changed: false };
+  }
+
+  const migratedFrom = config.plugin.filter((plugin: string) =>
+    LEGACY_PLUGIN_NAMES.includes(plugin as (typeof LEGACY_PLUGIN_NAMES)[number])
+  );
+
+  if (migratedFrom.length === 0) {
+    return { migratedFrom: [], changed: false };
+  }
+
+  const preserved = config.plugin.filter(
+    (plugin: string) => !ALL_PLUGIN_NAMES.includes(plugin as (typeof ALL_PLUGIN_NAMES)[number])
+  );
+
+  config.plugin = [...preserved, PLUGIN_NAME];
+  return { migratedFrom, changed: true };
 }
 
 // ============================================================================
@@ -133,8 +162,18 @@ async function installPlugin(options: { local?: boolean; tui?: boolean }) {
       config.plugin = [];
     }
 
+    const migration = normalizePluginEntries(config);
+
+    if (migration.changed) {
+      writeConfig(configPath, config);
+      success(`플러그인 항목을 최신 형식으로 마이그레이션했습니다!`);
+      info(`변환됨: ${migration.migratedFrom.join(", ")} -> ${PLUGIN_NAME}`);
+      log("");
+      return;
+    }
+
     // Check if already installed
-    if (isPluginInstalled(config)) {
+    if (config.plugin.includes(PLUGIN_NAME)) {
       warning(`플러그인이 이미 설치되어 있습니다.`);
       info(`현재 ${scope} 설정에 등록되어 있습니다: ${PLUGIN_NAME}`);
       log("");
@@ -194,7 +233,9 @@ async function uninstallPlugin(options: { local?: boolean; tui?: boolean }) {
     }
 
     // Remove plugin
-    config.plugin = config.plugin.filter((p: string) => p !== PLUGIN_NAME);
+    config.plugin = config.plugin.filter(
+      (p: string) => !ALL_PLUGIN_NAMES.includes(p as (typeof ALL_PLUGIN_NAMES)[number])
+    );
 
     // Save config
     writeConfig(configPath, config);
@@ -246,6 +287,7 @@ async function showStatus(options: { local?: boolean }) {
     const globalPath = getConfigPath(false);
     const globalConfig = readConfig(globalPath);
     const globalInstalled = isPluginInstalled(globalConfig);
+    const globalEntries = getInstalledPluginEntries(globalConfig);
 
     log(`📦 전역 설치:`, "bright");
     if (globalInstalled) {
@@ -258,7 +300,9 @@ async function showStatus(options: { local?: boolean }) {
 
     // Check local installation
     const localPath = getConfigPath(true);
-    const localInstalled = fs.existsSync(localPath) && isPluginInstalled(readConfig(localPath));
+    const localConfig = fs.existsSync(localPath) ? readConfig(localPath) : {};
+    const localInstalled = isPluginInstalled(localConfig);
+    const localEntries = getInstalledPluginEntries(localConfig);
 
     log(`📂 프로젝트 설치:`, "bright");
     if (localInstalled) {
@@ -274,6 +318,14 @@ async function showStatus(options: { local?: boolean }) {
       log(`ℹ️  플러그인 정보:`, "cyan");
       log(`   이름: ${PLUGIN_NAME}`, "dim");
       log(`   버전: ${VERSION}`, "dim");
+      const installedEntries = [...globalEntries, ...localEntries];
+      const legacyEntries = installedEntries.filter((entry) =>
+        LEGACY_PLUGIN_NAMES.includes(entry as (typeof LEGACY_PLUGIN_NAMES)[number])
+      );
+      if (legacyEntries.length > 0) {
+        warning(`구형 플러그인 항목이 감지되었습니다: ${legacyEntries.join(", ")}`);
+        info(`다음 명령으로 자동 마이그레이션하세요: maskweaver install`);
+      }
       log("");
     }
 

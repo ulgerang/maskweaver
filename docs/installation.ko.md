@@ -25,7 +25,7 @@ OpenCode 설정에 추가만 하면 됩니다 - **npm install 불필요!**
 
 ```json
 {
-  "plugin": ["maskweaver"]
+  "plugin": ["maskweaver/plugin"]
 }
 ```
 
@@ -60,7 +60,7 @@ OpenCode가 시작할 때 `~/.cache/opencode/node_modules/`에 자동으로 플�
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["maskweaver"]
+  "plugin": ["maskweaver/plugin"]
 }
 ```
 
@@ -71,7 +71,7 @@ OpenCode가 시작할 때 `~/.cache/opencode/node_modules/`에 자동으로 플�
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["maskweaver"]
+  "plugin": ["maskweaver/plugin"]
 }
 ```
 
@@ -603,7 +603,7 @@ mkdir -p ~/.config/opencode
 cat > ~/.config/opencode/opencode.json << 'EOF'
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["maskweaver"]
+  "plugin": ["maskweaver/plugin"]
 }
 EOF
 ```
@@ -616,7 +616,7 @@ New-Item -ItemType Directory -Force -Path $configPath
 @"
 {
   "`$schema": "https://opencode.ai/config.json",
-  "plugin": ["maskweaver"]
+  "plugin": ["maskweaver/plugin"]
 }
 "@ | Out-File -Encoding UTF8 "$configPath\opencode.json"
 ```

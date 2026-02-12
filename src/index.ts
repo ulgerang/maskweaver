@@ -8,7 +8,5 @@
  */
 
 import { MaskweaverPlugin } from "./plugin/index.js";
-export { VERSION, getVersionString } from "./version.js";
 
-export { MaskweaverPlugin };
 export default MaskweaverPlugin;

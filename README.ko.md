@@ -65,14 +65,14 @@ OpenCode 설정에 추가하면 끝!
 **전역** (`~/.config/opencode/opencode.json`):
 ```json
 {
-  "plugin": ["maskweaver"]
+  "plugin": ["maskweaver/plugin"]
 }
 ```
 
 **또는 프로젝트별** (프로젝트 루트의 `opencode.json`):
 ```json
 {
-  "plugin": ["maskweaver"]
+  "plugin": ["maskweaver/plugin"]
 }
 ```
 

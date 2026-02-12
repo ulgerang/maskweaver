@@ -84,14 +84,14 @@ Add to your OpenCode config - that's it!
 **Global** (`~/.config/opencode/opencode.json`):
 ```json
 {
-  "plugin": ["maskweaver"]
+  "plugin": ["maskweaver/plugin"]
 }
 ```
 
 **Or per-project** (`opencode.json` in project root):
 ```json
 {
-  "plugin": ["maskweaver"]
+  "plugin": ["maskweaver/plugin"]
 }
 ```
 

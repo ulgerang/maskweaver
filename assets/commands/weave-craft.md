@@ -21,7 +21,7 @@ AI가 자동으로 검증 루프를 돌리고, 완료되면 유저에게 전달�
 
 ## 핵심 원칙: 요청받은 Phase만 구현
 
-> **⚠️ CRITICAL: `/weave-craft`는 지정된 Phase의 작업만 수행합니다. 다른 Phase의 작업이나 계획에 없는 범위 밖 구현은 절대 수행하지 않습니다.**
+> **CRITICAL: `/weave-craft`는 지정된 Phase의 작업만 수행합니다. 다른 Phase의 작업이나 계획에 없는 범위 밖 구현은 절대 수행하지 않습니다.**
 
 - 플랜 파일에 정의된 해당 Phase의 `checklist`와 `tasks` 항목만 구현합니다.
 - 다음 Phase에 해당하는 작업을 미리 구현하지 않습니다.
@@ -39,11 +39,12 @@ AI가 자동으로 검증 루프를 돌리고, 완료되면 유저에게 전달�
 2. active_plan 값 확인
 3. .opencode/weave/plans/{active_plan}.yaml 읽기
 4. 해당 Phase 상태 확인
+5. 해당 Phase의 acceptance 항목 확인
 ```
 
 **활성 플랜이 없는 경우**:
 ```markdown
-❌ 활성 플랜이 없습니다.
+활성 플랜이 없습니다.
 
 플랜을 먼저 만들어주세요: `/weave-design [docs]`
 또는 기존 플랜을 선택하세요: `/weave-switch`
@@ -51,7 +52,7 @@ AI가 자동으로 검증 루프를 돌리고, 완료되면 유저에게 전달�
 
 **요청한 Phase가 없는 경우**:
 ```markdown
-❌ 플랜 `emotion-diary`에 Phase P7이 없습니다.
+플랜 `emotion-diary`에 Phase P7이 없습니다.
 
 사용 가능한 Phase:
 - P1: 감정 선택 UI ✅
@@ -64,9 +65,9 @@ AI가 자동으로 검증 루프를 돌리고, 완료되면 유저에게 전달�
 ## 실행 흐름
 
 ```
-0. LOAD PLAN (활성 플랜 + Phase 정보 로드)
+0. LOAD PLAN (활성 플랜 + Phase 정보 + 검증 기준 로드)
    ↓
-1. UNDERSTAND (Phase 요구사항 확인)
+1. UNDERSTAND (Phase 요구사항 + 검증 기준 확인)
    ↓
 2. DESIGN (Task 분해 + 설계)
    ↓
@@ -81,9 +82,11 @@ AI가 자동으로 검증 루프를 돌리고, 완료되면 유저에게 전달�
    │       └─ FAIL → 글로벌 지식 검색 → 수정 → 재검증
    └─ 5회 초과 → 유저에게 도움 요청
    ↓
-4. UPDATE PLAN (Phase 상태 업데이트)
+4. ACCEPTANCE VERIFY (Phase 검증 기준 실행)
    ↓
-5. USER HANDOFF (검증 완료 → 유저 테스트)
+5. UPDATE PLAN (Phase 상태 + 검증 결과 업데이트)
+   ↓
+6. USER HANDOFF (검증 완료 → 유저 테스트)
 ```
 
 ---
@@ -97,6 +100,7 @@ active_plan: "emotion-diary"
 # 2. plans/emotion-diary.yaml에서 Phase 정보 로드
 # 3. Phase 상태가 pending 또는 in_progress인지 확인
 # 4. completed인 Phase를 재실행하려면 유저에게 확인
+# 5. Phase의 acceptance 항목을 로드하여 검증 기준 파악
 ```
 
 ### YAML 읽기 실패 시 자동 수복
@@ -133,6 +137,22 @@ YAML 읽기 수복 절차:
 ```
 
 > **주의**: 수복 시 원본 데이터를 최대한 보존합니다. 확실하지 않은 값은 추측하지 않고, 유저에게 확인을 요청합니다.
+
+---
+
+## Step 1: UNDERSTAND
+
+Phase의 요구사항과 **검증 기준**을 확인합니다.
+
+```
+Phase 정보에서 확인:
+1. checklist — 구현해야 할 항목
+2. acceptance — Phase 완료 시 통과해야 할 검증 기준
+   - type별로 실행 전략 결정
+   - e2e/integration/script → 자동 실행 대상
+   - performance → 벤치마크 실행 대상
+   - manual → 유저 핸드오프에 포함
+```
 
 ---
 
@@ -261,10 +281,6 @@ Stuck on performance issue:
 | 2 | Lint | `npm run lint` | 재시도 (코드 수정) |
 | 3 | Build | `npm run build` | 재시도 (코드 수정) |
 | 4 | Unit Tests | `npm test` | 재시도 (테스트/코드 수정) |
-| 5 | E2E Tests | `playwright test` | 재시도 (앱/테스트 수정) |
-| 6 | Screenshot | Playwright / browser | 시각적 확인 |
-| 7 | API Check | `fetch` / `curl` | 재시도 (서버/라우트 수정) |
-| 8 | A11y | axe-core / Lighthouse | 재시도 (접근성 개선) |
 
 ### 검증 재시도 루프
 
@@ -281,7 +297,62 @@ Stuck on performance issue:
 
 ---
 
-## Step 4: UPDATE PLAN
+## Step 4: ACCEPTANCE VERIFY
+
+BUILD + SELF-VERIFY LOOP가 모두 통과한 후, **Phase의 검증 기준을 실행**합니다.
+
+이 단계는 "코드가 빌드/테스트를 통과하는가"가 아니라, **"원래 요구사항을 충족하는가"**를 확인합니다.
+
+### 실행 절차
+
+```
+1. Phase의 acceptance 항목을 type별로 분류
+   ├─ 자동 실행: e2e, integration, script, performance
+   └─ 수동 확인: manual → 유저 핸드오프에 포함
+
+2. 자동 실행 가능한 검증 기준 실행
+   ├─ e2e → Playwright/Cypress 테스트 실행
+   │        (검증 기준의 scenario를 테스트로 작성하여 실행)
+   ├─ integration → API/서비스 통합 테스트 실행
+   ├─ script → 스크립트 실행 및 결과 확인
+   └─ performance → 벤치마크 실행 및 기준값 비교
+
+3. 각 검증 기준의 status 업데이트
+   ├─ passed: 시나리오 통과
+   └─ failed: 실패 → 수정 → 재실행 (재시도 루프 적용)
+```
+
+### e2e/integration 검증 기준의 테스트 작성
+
+검증 기준에서 테스트를 작성할 때:
+
+```
+acceptance 항목:
+  - id: AC-R1-1
+    scenario: "감정 선택 → 텍스트 입력 → 저장 → 목록에서 확인"
+    type: e2e
+
+→ 이 시나리오를 Playwright/Cypress 테스트로 변환하여 실행
+→ 테스트 파일은 프로젝트의 테스트 디렉토리에 배치
+→ 실행 결과로 status를 passed/failed로 판정
+```
+
+### 검증 실패 시
+
+```
+검증 기준 실패
+    ↓
+재시도 카운터 < 3?
+    ├─ YES → 원인 분석 → 코드 수정 → 재실행
+    └─ NO → 유저에게 보고
+              - 어떤 검증 기준이 실패했는지
+              - 시도한 수정 내용
+              - 유저 판단 요청 (수정 계속 / 스킵 / 기준 변경)
+```
+
+---
+
+## Step 5: UPDATE PLAN
 
 Phase 완료 시 플랜 파일을 업데이트합니다:
 
@@ -302,6 +373,15 @@ phases:
     retry_count: 1
     issues:
       - "JSON 직렬화 오류 → useEffect 의존성 추가로 해결"
+    acceptance:
+      - id: "AC-R1-1"
+        scenario: "감정 선택 → 텍스트 입력 → 저장 → 목록에서 확인"
+        type: "e2e"
+        status: "passed"
+      - id: "AC-R1-2"
+        scenario: "빈 텍스트로 저장 시도 → 에러 메시지 표시"
+        type: "e2e"
+        status: "passed"
 ```
 
 ### 플랜 업데이트 후 검증 (필수)
@@ -310,17 +390,19 @@ phases:
 
 1. **Phase 상태 반영 확인**: 해당 Phase의 `status`가 `completed`로 변경되었는지 검증
 2. **타임스탬프 기록 확인**: `started_at`과 `completed_at`이 올바르게 기록되었는지 검증
-3. **다른 Phase 무변경 확인**: 실행하지 않은 Phase들의 상태가 변경되지 않았는지 검증
-4. **검증 실패 시**: 유저에게 오류를 알리고 플랜 파일 재업데이트 시도
+3. **검증 기준 결과 확인**: 각 acceptance 항목의 `status`가 `passed`/`failed`로 업데이트되었는지 검증
+4. **다른 Phase 무변경 확인**: 실행하지 않은 Phase들의 상태가 변경되지 않았는지 검증
+5. **검증 실패 시**: 유저에게 오류를 알리고 플랜 파일 재업데이트 시도
 
 ```
 검증 절차:
 1. Read(".opencode/weave/plans/{active_plan}.yaml") → 전체 플랜 파일 읽기
 2. 해당 Phase의 status == "completed" 확인
 3. started_at, completed_at 값 존재 확인
-4. 다른 Phase들의 status가 원래 값 그대로인지 확인
-5. 모두 정상이면 → 유저 핸드오프 진행
-6. 하나라도 실패하면 → 오류 보고 및 재시도
+4. acceptance 항목들의 status 값 확인
+5. 다른 Phase들의 status가 원래 값 그대로인지 확인
+6. 모두 정상이면 → 유저 핸드오프 진행
+7. 하나라도 실패하면 → 오류 보고 및 재시도
 ```
 
 ### YAML 쓰기 시 자동 수복
@@ -357,31 +439,36 @@ YAML 쓰기 수복 절차:
 
 ## 유저 핸드오프
 
-모든 Task 통과 후:
+모든 Task + Acceptance Verify 통과 후:
 
 ```markdown
-## ✅ Phase P1 검증 완료!
+## Phase P1 검증 완료!
 
 **플랜**: `emotion-diary`
 
 ### AI 자동 테스트 결과
 | 테스트 | 결과 |
 |--------|------|
-| Build | ✅ 성공 |
-| Unit Tests | ✅ 15/15 |
-| Lint | ✅ 통과 |
+| Build | PASS |
+| Unit Tests | 15/15 PASS |
+| Lint | PASS |
+
+### 검증 기준 결과
+| ID | 시나리오 | 유형 | 결과 |
+|----|---------|------|------|
+| AC-R1-1 | 감정 선택 → 텍스트 입력 → 저장 → 목록에서 확인 | e2e | PASS |
+| AC-R1-2 | 빈 텍스트로 저장 시도 → 에러 메시지 표시 | e2e | PASS |
 
 ### 사용된 마스크
 - Kent Beck (테스트)
 - Dan Abramov (React 컴포넌트)
 
-### 접속
-http://localhost:5173
-
 ### 사람만 판단 가능한 것
 - [ ] 느낌이 의도대로인가요?
 - [ ] 사용성이 좋은가요?
 - [ ] 원하던 기능이 맞나요?
+{manual 유형 검증 기준이 있으면 여기에 추가}
+- [ ] [manual] AC-R4-1: 네트워크 차단 후 기존 일기 목록 접근 가능
 
 **다음**: `/weave-craft P2` | **상태**: `/weave-status`
 ```

@@ -28,6 +28,7 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 | 명령어 | 설명 |
 |--------|------|
 | `/weave-init` | Weave 초기화 (프로젝트당 1회) |
+| `/weave-spec [docs]` | 요구사항 정제 → 검증 기준 추출 (선택) |
 | `/weave-design [docs]` | 요구사항 분석 → Phase 계획 (새 플랜 생성) |
 | `/weave-craft [phase-id]` | 활성 플랜의 Phase 실행 (자동 검증) |
 | `/weave-status` | 전체 플랜 목록 + 진행 상황 |
@@ -41,9 +42,11 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 ```
 /weave-init                    ← 프로젝트 초기화 (1회)
     ↓
-/weave-design docs/            ← 첫 번째 플랜 생성
+/weave-spec docs/              ← 요구사항 정제 + 검증 기준 추출 (선택)
     ↓
-/weave-craft P1                ← Phase 실행
+/weave-design docs/            ← 첫 번째 플랜 생성
+    ↓                            (spec이 있으면 자동 연동)
+/weave-craft P1                ← Phase 실행 + 검증 기준 확인
 /weave-craft P2
     ↓
 /weave-design wiki/new-feat    ← 두 번째 플랜 추가
@@ -70,6 +73,8 @@ active ──→ paused ──→ active (switch로 전환)
 ```
 .opencode/weave/
 ├── state.yaml           ← 활성 플랜 추적
+├── specs/
+│   └── emotion-diary.yaml   ← 요구사항 명세
 └── plans/
     ├── emotion-diary.yaml   ← 플랜 1
     ├── todo-app.yaml        ← 플랜 2
@@ -98,8 +103,8 @@ active ──→ paused ──→ active (switch로 전환)
 
 Phase 실행 시 자동 검증:
 1. TypeCheck → Lint → Build
-2. Unit Tests → E2E Tests
-3. Screenshot → A11y Check
+2. Unit Tests
+3. Acceptance Criteria (e2e, integration, performance 등)
 
 ---
 
@@ -109,21 +114,24 @@ Phase 실행 시 자동 검증:
 # 1. 초기화 (프로젝트당 1회)
 /weave-init
 
-# 2. 요구사항 문서로 계획 수립
-/weave-design wiki/
+# 2. (선택) 요구사항 정제 — 복잡한 프로젝트에서 권장
+/weave-spec docs/
 
-# 3. 피드백 → 승인
+# 3. 실행 계획 수립
+/weave-design docs/       # 또는 /weave-design emotion-diary (스펙 기반)
+
+# 4. 피드백 → 승인
 "좋아, 진행해"
 
-# 4. Phase 실행
+# 5. Phase 실행 (검증 기준 자동 확인)
 /weave-craft P1
 
-# 5. 테스트 → Approve → 반복
+# 6. 반복
 /weave-craft P2 ...
 
-# 6. 새 기능 추가? 새 플랜!
+# 7. 새 기능 추가? 새 플랜!
 /weave-design docs/new-feature
 
-# 7. 플랜 사이 전환
+# 8. 플랜 사이 전환
 /weave-switch emotion-diary
 ```

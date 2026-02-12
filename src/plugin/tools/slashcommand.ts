@@ -110,6 +110,24 @@ Example: weave command=craft phaseId="P1"`,
 
 Example: weave command=status`,
     },
+    'weave-repair': {
+        metadata: {
+            name: 'weave-repair',
+            description: 'Scan and auto-repair corrupted plan YAML files',
+            usage: '/weave repair',
+            examples: ['/weave repair'],
+        },
+        content: `Use the weave tool with command=repair to scan and auto-repair all plan YAML files.
+
+This command will:
+1. Scan all plan files in .opencode/weave/plans/
+2. Detect YAML corruption (unclosed quotes, tab characters, etc.)
+3. Auto-repair when possible (backup the corrupted file as .corrupted)
+4. Restore from .bak backup if auto-repair fails
+5. Report unrecoverable files that need manual intervention
+
+Example: weave command=repair`,
+    },
 };
 
 // ============================================================================
@@ -221,10 +239,11 @@ function getAllCommands(assetsDirs: string[], projectDir: string): CommandInfo[]
 export function createSlashcommandTool() {
     return {
         description: `Execute a slash command. Available commands include:
-- /weave help - Weave 워크플로우 도움말
-- /weave design [docs] - 요구사항 분석 및 계획 수립
-- /weave craft [phaseId] - Phase 실행
-- /weave status - 진행 상황 확인
+- /weave help - Weave workflow help
+- /weave design [docs] - Analyze requirements and create plan
+- /weave craft [phaseId] - Execute a phase
+- /weave status - View progress
+- /weave repair - Scan and auto-repair corrupted plan YAML files
 
 Use command="list" to see all available commands.`,
 
@@ -268,7 +287,7 @@ Use command="list" to see all available commands.`,
                 if (helpCmd) {
                     return helpCmd.content || 'Weave help content not available.';
                 }
-            } else if (['status', 'design', 'craft', 'help'].includes(cmdName)) {
+            } else if (['status', 'design', 'craft', 'help', 'repair'].includes(cmdName)) {
                 // Shorthand: "status" -> "weave-status"
                 const weaveCmd = commands.find(c => c.name === `weave-${cmdName}`);
                 if (weaveCmd) {

@@ -33,7 +33,6 @@ description: Weave 워크플로우 초기화 (프로젝트별 1회)
 ### 2. 디렉토리 구조 생성
 
 ```bash
-mkdir -p .opencode/weave/specs
 mkdir -p .opencode/weave/plans
 ```
 
@@ -66,14 +65,10 @@ active_plan: null
 ### 생성된 파일
 - `.ignore` — AI 도구 접근 허용 설정
 - `.opencode/weave/state.yaml` — 플랜 상태 추적
-- `.opencode/weave/specs/` — 요구사항 명세 저장 디렉토리
 - `.opencode/weave/plans/` — 플랜 저장 디렉토리
 
 ### 다음 단계
-요구사항을 정제하려면:
-`/weave-spec [docs-path]`
-
-바로 계획을 세우려면:
+프로젝트 계획을 세우려면:
 `/weave-design [docs-path]`
 ```
 

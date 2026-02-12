@@ -73,6 +73,19 @@ export {
     listPhases,
 } from './phase-manager.js';
 
+// YAML Repair
+export {
+    yamlEscapeString,
+    repairYamlContent,
+    safeWriteFile,
+    safeReadYaml,
+    repairPlanFile,
+    repairAllPlans,
+    validatePlanStructure,
+} from './yaml-repair.js';
+
+export type { RepairResult, MissingInfo } from './yaml-repair.js';
+
 // Verification System (Playwright, Visual, API)
 export {
     // Playwright E2E Testing

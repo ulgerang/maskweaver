@@ -30,15 +30,17 @@ Commands:
 - status: View overall progress
 - troubleshoot [error]: Search global knowledge for solutions
 - record [solution]: Record a troubleshooting solution
+- repair: Scan and auto-repair corrupted plan YAML files
 
 Examples:
 - weave design docs/
 - weave craft P1
 - weave status
+- weave repair
 - weave troubleshoot "Cannot find module 'xyz'"`,
 
         args: {
-            command: z.enum(['design', 'craft', 'status', 'troubleshoot', 'record', 'approve', 'help'])
+            command: z.enum(['design', 'craft', 'status', 'troubleshoot', 'record', 'approve', 'help', 'repair'])
                 .describe('Weave command to execute'),
             docsPath: z.string().optional()
                 .describe('Path to requirements documents (for design command)'),
@@ -58,7 +60,7 @@ Examples:
 
         execute: async (
             args: {
-                command: 'design' | 'craft' | 'status' | 'troubleshoot' | 'record' | 'approve' | 'help';
+                command: 'design' | 'craft' | 'status' | 'troubleshoot' | 'record' | 'approve' | 'help' | 'repair';
                 docsPath?: string;
                 phaseId?: string;
                 projectName?: string;
@@ -91,6 +93,9 @@ Examples:
 
                     case 'approve':
                         return await handleApprove(args);
+
+                    case 'repair':
+                        return await handleRepair(basePath);
 
                     case 'help':
                         return getHelpMessage();
@@ -163,28 +168,29 @@ async function handleCraft(
     basePath: string
 ): Promise<string> {
     const { phaseId, projectType } = args;
-    const manager = getPhaseManager(basePath);
 
     if (!phaseId) {
         // Get next phase
+        const manager = getPhaseManager(basePath);
         await manager.loadPlan();
-        const recoveryMessages = manager.getRecoveryMessages();
-        const nextPhase = manager.getNextPhase();
-
-        // Prepend recovery warnings if any
-        const prefix = recoveryMessages.length > 0
-            ? `### ⚠️ YAML 자동 복구\n${recoveryMessages.map(m => `- ${m}`).join('\n')}\n\n`
+        
+        // Show any recovery messages from auto-repair during load
+        const recoveryMsgs = manager.getRecoveryMessages();
+        const recoveryPrefix = recoveryMsgs.length > 0
+            ? `> **Auto-repair**: ${recoveryMsgs.join('; ')}\n\n`
             : '';
+        
+        const nextPhase = manager.getNextPhase();
 
         if (!nextPhase) {
             const stats = manager.getStats();
             if (stats.progress === 100) {
-                return prefix + '🎉 모든 Phase가 완료되었습니다!';
+                return recoveryPrefix + 'All phases completed!';
             }
-            return prefix + 'Error: 실행할 Phase가 없습니다. 먼저 /weave design으로 계획을 세워주세요.';
+            return recoveryPrefix + 'Error: No phase to execute. Run /weave design first.';
         }
 
-        return prefix + `다음 Phase: ${nextPhase.id} - ${nextPhase.name}\n\n실행하려면: weave craft ${nextPhase.id}`;
+        return recoveryPrefix + `Next Phase: ${nextPhase.id} - ${nextPhase.name}\n\nRun: weave craft ${nextPhase.id}`;
     }
 
     // Execute the phase
@@ -208,11 +214,12 @@ async function handleCraft(
 
 async function handleStatus(basePath: string): Promise<string> {
     const manager = getPhaseManager(basePath);
-    // Pre-load plan to capture recovery messages
     await manager.loadPlan();
-    const recoveryMessages = manager.getRecoveryMessages();
-
+    
     const report = await generateStatusReport(basePath);
+
+    // Show any recovery messages from auto-repair
+    const recoveryMsgs = manager.getRecoveryMessages();
 
     // Add global knowledge stats
     const knowledge = new GlobalKnowledge();
@@ -220,21 +227,22 @@ async function handleStatus(basePath: string): Promise<string> {
     const stats = await knowledge.getStats();
 
     const lines: string[] = [];
-
+    
     // Show recovery warnings at the top
-    if (recoveryMessages.length > 0) {
-        lines.push('### ⚠️ YAML 자동 복구');
-        for (const msg of recoveryMessages) {
-            lines.push(`- ${msg}`);
+    if (recoveryMsgs.length > 0) {
+        lines.push('### YAML Auto-Repair Report\n');
+        for (const msg of recoveryMsgs) {
+            lines.push(`> ${msg}`);
         }
         lines.push('');
+        lines.push('> Run `weave repair` for a full repair scan.\n');
     }
-
+    
     lines.push(report, '');
-    lines.push('### 🧠 글로벌 지식베이스');
-    lines.push(`- 총 트러블슈팅 기록: ${stats.totalEntries}개`);
+    lines.push('### Global Knowledge Base');
+    lines.push(`- Total troubleshooting records: ${stats.totalEntries}`);
     if (stats.topProjectTypes.length > 0) {
-        lines.push(`- 주요 프로젝트 유형: ${stats.topProjectTypes.slice(0, 3).map(t => `${t.type}(${t.count})`).join(', ')}`);
+        lines.push(`- Top project types: ${stats.topProjectTypes.slice(0, 3).map(t => `${t.type}(${t.count})`).join(', ')}`);
     }
 
     return lines.join('\n');
@@ -286,6 +294,12 @@ async function handleRecord(args: { error?: string; solution?: string; context?:
     return `✅ 트러블슈팅 솔루션이 기록되었습니다 (ID: ${id})\n\n다음에 비슷한 에러가 발생하면 자동으로 이 해결책을 제안합니다.`;
 }
 
+async function handleRepair(basePath: string): Promise<string> {
+    const manager = getPhaseManager(basePath);
+    const { results, summary } = await manager.repairPlans();
+    return summary;
+}
+
 async function handleApprove(args: { phaseId?: string }): Promise<string> {
     const { phaseId } = args;
 
@@ -298,33 +312,36 @@ async function handleApprove(args: { phaseId?: string }): Promise<string> {
 }
 
 function getHelpMessage(): string {
-    return `## 🌀 Weave 워크플로우 도움말
+    return `## Weave Workflow Help
 
-**Weave**는 Maskweaver의 Phase-Driven Development 워크플로우입니다.
-"AI가 검증하고, 유저가 확인한다"
+**Weave** is Maskweaver's Phase-Driven Development workflow.
+"AI verifies, User confirms"
 
-### 명령어
+### Commands
 
-| 명령어 | 설명 |
-|--------|------|
-| \`weave design [docs]\` | 요구사항 분석 → Phase 계획 |
-| \`weave craft [id]\` | Phase 실행 (자동 검증) |
-| \`weave status\` | 진행 상황 확인 |
-| \`weave troubleshoot [error]\` | 글로벌 지식에서 해결책 검색 |
-| \`weave record [solution]\` | 새 해결책 기록 |
+| Command | Description |
+|---------|-------------|
+| \`weave design [docs]\` | Analyze requirements and create phase plan |
+| \`weave craft [id]\` | Execute a phase (with auto-verification) |
+| \`weave status\` | View progress |
+| \`weave repair\` | Scan and auto-repair corrupted plan YAML files |
+| \`weave troubleshoot [error]\` | Search global knowledge for solutions |
+| \`weave record [solution]\` | Record a new solution |
 
-### 핵심 기능
+### Key Features
 
-- 🎭 **마스크 자동 선택**: 작업에 맞는 전문가 마스크 자동 적용
-- 🧠 **글로벌 지식 공유**: 프로젝트 간 트러블슈팅 경험 공유
-- ✅ **자동 검증**: Build + Self-Verify Loop
+- **Mask Auto-Selection**: Automatically applies expert masks per task
+- **Global Knowledge Sharing**: Cross-project troubleshooting experience
+- **Auto-Verification**: Build + Self-Verify Loop
+- **YAML Auto-Repair**: Automatically detects and fixes corrupted plan files
 
-### 빠른 시작
+### Quick Start
 
 \`\`\`
-weave design docs/   # 계획 수립
-weave craft P1       # Phase 1 실행
-weave status         # 진행 확인
+weave design docs/   # Plan
+weave craft P1       # Execute Phase 1
+weave status         # Check progress
+weave repair         # Fix corrupted YAML
 \`\`\`
 `;
 }

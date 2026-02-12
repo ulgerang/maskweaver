@@ -34,3 +34,4 @@ pnpm-lock.yaml
 # OpenCode data (local)
 .opencode-data/
 .opencode/
+nul

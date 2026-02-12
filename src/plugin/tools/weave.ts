@@ -5,7 +5,7 @@
  * Commands: design, craft, status
  */
 
-import { tool } from '@opencode-ai/plugin';
+import { tool } from '@opencode-ai/plugin/tool';
 const z = tool.schema;
 
 import { VERSION } from '../../version.js';

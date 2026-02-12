@@ -12,7 +12,8 @@
 * Based on oh-my-opencode plugin development patterns.
 */
 
-import { tool, type Plugin } from '@opencode-ai/plugin';
+import { tool } from '@opencode-ai/plugin/tool';
+import type { Plugin } from '@opencode-ai/plugin';
 const z = tool.schema;
 import * as fs from 'node:fs';
 import * as path from 'node:path';

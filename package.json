@@ -1,6 +1,6 @@
 {
   "name": "maskweaver",
-  "version": "0.7.30",
+  "version": "0.7.31",
   "description": "AI Expert Persona System - Give your AI coding assistant expert personalities (가면술사)",
   "type": "module",
   "main": "./dist/index.js",
@@ -129,7 +129,7 @@
     }
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "^1.1.48",
+    "@opencode-ai/plugin": "^1.1.59",
     "@opencode-ai/sdk": "^1.1.48",
     "@rollup/rollup-win32-x64-msvc": "^4.57.1",
     "@types/better-sqlite3": "^7.6.13",

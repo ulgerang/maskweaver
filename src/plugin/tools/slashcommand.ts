@@ -10,7 +10,7 @@
  * 3. Project .opencode/commands/ folder (overrides)
  */
 
-import { tool } from '@opencode-ai/plugin';
+import { tool } from '@opencode-ai/plugin/tool';
 const z = tool.schema;
 
 import * as fs from 'node:fs';

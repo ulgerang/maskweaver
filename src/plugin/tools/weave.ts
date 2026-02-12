@@ -10,7 +10,7 @@ const z = tool.schema;
 
 import { intake } from '../../weave/stages/intake.js';
 import { plan } from '../../weave/stages/plan.js';
-import { execute } from '../../weave/stages/execute.js';
+import { execute, preparePhaseExecution, formatExecutionPlan } from '../../weave/stages/execute.js';
 import { handoff, generateStatusReport, handleUserResponse } from '../../weave/stages/handoff.js';
 import { getPhaseManager } from '../../weave/phase-manager.js';
 import { searchTroubleshooting, recordTroubleshooting, GlobalKnowledge } from '../../weave/knowledge/global.js';
@@ -193,23 +193,19 @@ async function handleCraft(
         return recoveryPrefix + `Next Phase: ${nextPhase.id} - ${nextPhase.name}\n\nRun: weave craft ${nextPhase.id}`;
     }
 
-    // Execute the phase
-    const orchestrator = getOrchestrator();
+    // Prepare execution plan (validates, marks in_progress, generates plan)
     const events: any[] = [];
-
-    const result = await execute({
+    const { plan: executionPlan, phase } = await preparePhaseExecution({
         phaseId,
         projectType,
         onEvent: (event) => events.push(event),
     });
 
-    // Generate handoff message
-    const handoffResult = await handoff({
-        phaseId,
-        onEvent: (event) => events.push(event),
-    });
+    // Format the execution plan as markdown for the Mask Weaver
+    const planMarkdown = formatExecutionPlan(executionPlan);
 
-    return handoffResult.message;
+    // Return the plan — the Mask Weaver will delegate tasks via Task tool
+    return planMarkdown;
 }
 
 async function handleStatus(basePath: string): Promise<string> {

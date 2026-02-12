@@ -36,6 +36,38 @@ export interface WeaveTask {
     maskUsed?: string;             // Which mask was used for this task
 }
 
+// ============================================================================
+// Agent Tier & Complexity (Execution Optimization)
+// ============================================================================
+
+/** Agent tier for task delegation - maps to subagent_type */
+export type AgentTier = 'dummy-flash' | 'dummy-human' | 'dummy-premium';
+
+/** Task complexity assessment */
+export type TaskComplexity = 'simple' | 'standard' | 'complex';
+
+/** Execution plan for a single task within a phase */
+export interface TaskExecutionPlan {
+    task: WeaveTask;
+    mask: string | null;
+    agentTier: AgentTier;
+    complexity: TaskComplexity;
+    troubleshootingHints: string[];
+}
+
+/** Execution plan for an entire phase */
+export interface PhaseExecutionPlan {
+    phaseId: string;
+    phaseName: string;
+    status: PhaseStatus;
+    taskPlans: TaskExecutionPlan[];
+    summary: string;
+}
+
+// ============================================================================
+// Plan Types
+// ============================================================================
+
 export interface WeavePlan {
     projectName: string;
     createdAt: string;

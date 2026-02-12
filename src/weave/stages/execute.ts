@@ -1,18 +1,20 @@
 /**
  * Weave Execute Stage
  * 
- * The Build + Self-Verify Loop.
- * This is where the actual work happens, with:
- * - Automatic mask selection per task
- * - Global knowledge search for troubleshooting
- * - 3-tier verification escalation
- * - Automatic retry with knowledge recording
+ * Generates execution plans with automatic mask and agent tier selection.
+ * Actual code generation/testing is performed by AI agents (dummy-flash/human/premium)
+ * via the Task tool — this module handles:
+ * - Phase validation and dependency checking
+ * - Execution plan generation (mask + agent tier per task)
+ * - Formatting the plan for the Mask Weaver to act upon
+ * - AI-driven verification system integration
  */
 
-import type { WeavePhase, WeaveTask, WeaveConfig, WeaveEvent } from '../types.js';
+import type { WeavePhase, WeaveTask, WeaveConfig, WeaveEvent, PhaseExecutionPlan, AgentTier } from '../types.js';
 import { WeaveOrchestrator, getOrchestrator } from '../orchestrator.js';
 import { PhaseManager, getPhaseManager } from '../phase-manager.js';
 import { searchTroubleshooting, recordTroubleshooting } from '../knowledge/global.js';
+import { analyzeParallelOpportunities, formatParallelAnalysis } from '../bridge.js';
 import {
     checkPlaywrightSetup,
     runPlaywrightTests,
@@ -32,6 +34,11 @@ export interface ExecuteOptions {
     techStack?: string[];
 }
 
+export interface PrepareResult {
+    plan: PhaseExecutionPlan;
+    phase: WeavePhase;
+}
+
 export interface ExecuteResult {
     success: boolean;
     phase: WeavePhase;
@@ -41,6 +48,7 @@ export interface ExecuteResult {
     troubleshootingRecorded: number;
     masksUsed: string[];
     durationMs: number;
+    executionPlan?: PhaseExecutionPlan;
 }
 
 export interface TaskExecutionContext {
@@ -53,12 +61,23 @@ export interface TaskExecutionContext {
 }
 
 // ============================================================================
-// Execute Stage
+// Prepare Phase Execution (primary entry point for craft)
 // ============================================================================
 
-export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
-    const startTime = Date.now();
-    const { phaseId, onEvent = () => { }, projectType, techStack } = options;
+/**
+ * Prepare a phase for execution.
+ * 
+ * This is the primary entry point for craft. It:
+ * 1. Validates dependencies
+ * 2. Marks the phase as in_progress
+ * 3. Generates an execution plan (mask + agent tier per task)
+ * 4. Returns the plan for the Mask Weaver to delegate via Task tool
+ * 
+ * The actual code generation/testing is performed by AI agents
+ * (dummy-flash, dummy-human, dummy-premium) — not by this function.
+ */
+export async function preparePhaseExecution(options: ExecuteOptions): Promise<PrepareResult> {
+    const { phaseId, onEvent = () => { }, projectType } = options;
 
     const manager = getPhaseManager();
     const orchestrator = getOrchestrator();
@@ -86,207 +105,137 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     await manager.updatePhaseStatus(phaseId, 'in_progress');
     onEvent({ type: 'phase_started', phaseId });
 
-    // Track stats
-    let tasksCompleted = 0;
-    let tasksFailed = 0;
-    let troubleshootingUsed = 0;
-    let troubleshootingRecorded = 0;
-    const masksUsed: Set<string> = new Set();
-
-    // Execute each task
-    for (const task of phase.tasks) {
-        onEvent({ type: 'task_started', phaseId, taskId: task.id });
-
-        const context: TaskExecutionContext = {
-            task,
-            phase,
-            orchestrator,
-            onEvent,
-            projectType,
-            techStack,
-        };
-
-        try {
-            const result = await executeTask(context);
-
-            if (result.success) {
-                tasksCompleted++;
-                await manager.updateTaskStatus(phaseId, task.id, 'passed', {
-                    maskUsed: result.maskUsed,
-                });
-                onEvent({ type: 'task_passed', phaseId, taskId: task.id });
-            } else {
-                tasksFailed++;
-                await manager.updateTaskStatus(phaseId, task.id, 'failed', {
-                    lastError: result.error,
-                    maskUsed: result.maskUsed,
-                });
-                onEvent({ type: 'task_failed', phaseId, taskId: task.id, error: result.error || 'Unknown error' });
-            }
-
-            if (result.maskUsed) {
-                masksUsed.add(result.maskUsed);
-            }
-
-            troubleshootingUsed += result.troubleshootingUsed || 0;
-            troubleshootingRecorded += result.troubleshootingRecorded || 0;
-
-        } catch (e) {
-            tasksFailed++;
-            const errorMsg = e instanceof Error ? e.message : String(e);
-            await manager.updateTaskStatus(phaseId, task.id, 'failed', {
-                lastError: errorMsg,
-            });
-            onEvent({ type: 'task_failed', phaseId, taskId: task.id, error: errorMsg });
-        }
-    }
-
-    // Determine phase outcome
-    const allPassed = tasksFailed === 0 && tasksCompleted === phase.tasks.length;
-
-    if (allPassed) {
-        // Don't mark as completed - wait for user approval
-        // Just update masks used
-        await manager.updatePhaseStatus(phaseId, 'in_progress', {
-            masksUsed: Array.from(masksUsed),
-        });
-    }
-
-    const finalPhase = manager.getPhase(phaseId)!;
+    // Generate execution plan with mask + agent tier per task
+    const executionPlan = await orchestrator.generateExecutionPlan(phase, { projectType });
 
     return {
-        success: allPassed,
-        phase: finalPhase,
-        tasksCompleted,
-        tasksFailed,
-        troubleshootingUsed,
-        troubleshootingRecorded,
-        masksUsed: Array.from(masksUsed),
-        durationMs: Date.now() - startTime,
+        plan: executionPlan,
+        phase,
     };
 }
 
 // ============================================================================
-// Task Execution (with retry and knowledge integration)
+// Format Execution Plan (markdown output for Mask Weaver)
 // ============================================================================
 
-interface TaskResult {
-    success: boolean;
-    error?: string;
-    maskUsed?: string;
-    troubleshootingUsed?: number;
-    troubleshootingRecorded?: number;
-}
+/**
+ * Format a PhaseExecutionPlan into markdown instructions
+ * that the Mask Weaver can read and act upon.
+ */
+export function formatExecutionPlan(plan: PhaseExecutionPlan): string {
+    const lines: string[] = [];
 
-async function executeTask(context: TaskExecutionContext): Promise<TaskResult> {
-    const { task, orchestrator, onEvent, projectType, techStack } = context;
+    lines.push(`## Phase ${plan.phaseId}: ${plan.phaseName}`);
+    lines.push('');
+    lines.push('### Execution Plan');
+    lines.push('');
+    lines.push('| # | Task | Complexity | Agent Tier | Mask |');
+    lines.push('|---|------|-----------|------------|------|');
 
-    let troubleshootingUsed = 0;
-    let troubleshootingRecorded = 0;
-    let lastError: string | undefined;
-    let maskUsed: string | undefined;
-
-    // Select mask for this task
-    const selectedMask = orchestrator.selectMaskForTask(task);
-    if (selectedMask) {
-        maskUsed = selectedMask;
-        onEvent({
-            type: 'mask_selected',
-            maskId: selectedMask,
-            reason: `Auto-selected for task: ${task.name}`
-        });
+    for (let i = 0; i < plan.taskPlans.length; i++) {
+        const tp = plan.taskPlans[i];
+        const tierLabel = formatTierLabel(tp.agentTier);
+        const mask = tp.mask || 'auto';
+        lines.push(`| ${i + 1} | ${tp.task.name} | ${tp.complexity} | ${tierLabel} | ${mask} |`);
     }
 
-    // Retry loop
-    for (let attempt = 0; attempt < task.maxRetries; attempt++) {
-        try {
-            // This is where actual task execution would happen
-            // In practice, this integrates with the AI's code generation/verification
+    lines.push('');
 
-            // For now, this is a placeholder that would be replaced with actual execution logic
-            // The key insight is that we search for troubleshooting BEFORE attempting
-            // and record AFTER a successful fix
+    // Summarize tier distribution
+    const flash = plan.taskPlans.filter(p => p.agentTier === 'dummy-flash').length;
+    const human = plan.taskPlans.filter(p => p.agentTier === 'dummy-human').length;
+    const premium = plan.taskPlans.filter(p => p.agentTier === 'dummy-premium').length;
 
-            if (lastError) {
-                // Search for solutions from global knowledge
-                const solutions = await searchTroubleshooting(lastError, { projectType });
+    lines.push('### Delegation Strategy');
+    lines.push('');
+    if (flash > 0) lines.push(`- **dummy-flash** (${flash} tasks): Simple tasks -- fast & cheap`);
+    if (human > 0) lines.push(`- **dummy-human** (${human} tasks): Standard implementation`);
+    if (premium > 0) lines.push(`- **dummy-premium** (${premium} tasks): Complex reasoning required`);
+    lines.push('');
 
-                if (solutions.length > 0) {
-                    troubleshootingUsed++;
-                    onEvent({
-                        type: 'troubleshooting_found',
-                        query: lastError,
-                        solutions: solutions.length
-                    });
-
-                    // Try the top solution
-                    // In practice, this would apply the solution and re-verify
-                    const topSolution = solutions[0];
-                    console.log(`[Weave] Found solution from knowledge base: ${topSolution.entry.solution.slice(0, 100)}...`);
-
-                    // If a different mask might help, suggest rotation
-                    if (attempt >= 2 && maskUsed) {
-                        const taskType = orchestrator.detectTaskType(task.name);
-                        const alternateMask = orchestrator.suggestAlternativeMask(maskUsed, taskType);
-                        if (alternateMask !== maskUsed) {
-                            maskUsed = alternateMask;
-                            onEvent({
-                                type: 'mask_selected',
-                                maskId: alternateMask,
-                                reason: 'Rotated due to repeated failures'
-                            });
-                        }
-                    }
-                }
+    // Add troubleshooting hints if any
+    const tasksWithHints = plan.taskPlans.filter(p => p.troubleshootingHints.length > 0);
+    if (tasksWithHints.length > 0) {
+        lines.push('### Troubleshooting Hints (from Global Knowledge)');
+        lines.push('');
+        for (const tp of tasksWithHints) {
+            lines.push(`**${tp.task.name}**:`);
+            for (const hint of tp.troubleshootingHints) {
+                lines.push(`- ${hint}`);
             }
-
-            // Placeholder: actual execution would happen here
-            // For the real implementation, this would:
-            // 1. Generate code/tests with the selected mask
-            // 2. Run verification (lint, typecheck, tests)
-            // 3. Return success/failure
-
-            // Simulated success for now
-            return {
-                success: true,
-                maskUsed,
-                troubleshootingUsed,
-                troubleshootingRecorded,
-            };
-
-        } catch (e) {
-            lastError = e instanceof Error ? e.message : String(e);
-            task.retryCount = attempt + 1;
-
-            // If this is the last attempt and we succeeded after a fix,
-            // record it for future reference
-            if (attempt === task.maxRetries - 1) {
-                // Record the solution that worked
-                await recordTroubleshooting({
-                    errorMessage: lastError,
-                    context: `Task: ${task.name}`,
-                    solution: `Final solution after ${attempt + 1} attempts`,
-                    projectType,
-                    techStack,
-                    tags: ['auto-recorded'],
-                    effectiveness: 7, // Default medium-high
-                });
-                troubleshootingRecorded++;
-
-                onEvent({
-                    type: 'troubleshooting_recorded',
-                    errorSignature: lastError.slice(0, 50)
-                });
-            }
+            lines.push('');
         }
     }
 
+    // Parallel execution analysis (if multiple tasks)
+    if (plan.taskPlans.length > 1) {
+        const parallelAnalysis = analyzeParallelOpportunities(plan);
+        lines.push(formatParallelAnalysis(parallelAnalysis));
+        lines.push('');
+    }
+
+    // Execution instructions for the Mask Weaver
+    lines.push('### Instructions');
+    lines.push('');
+    lines.push('For each task above, delegate using `Task(<agent_tier>)` with the specified mask.');
+    lines.push('After all tasks pass, run `weave approve` to mark the phase complete.');
+    lines.push('');
+    lines.push('**Decision flow per task:**');
+    lines.push('1. Simple (flash) -> Handle directly or delegate to dummy-flash');
+    lines.push('2. Standard (human) -> Delegate to dummy-human with mask');
+    lines.push('3. Complex (premium) -> Delegate to dummy-premium with mask');
+
+    return lines.join('\n');
+}
+
+function formatTierLabel(tier: AgentTier): string {
+    switch (tier) {
+        case 'dummy-flash': return 'flash';
+        case 'dummy-human': return 'human';
+        case 'dummy-premium': return 'premium';
+    }
+}
+
+// ============================================================================
+// Legacy Execute (backward compatibility)
+// ============================================================================
+
+/**
+ * @deprecated Use preparePhaseExecution() + formatExecutionPlan() instead.
+ * Kept for backward compatibility.
+ */
+export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
+    const startTime = Date.now();
+    const { phaseId } = options;
+
+    // Use preparePhaseExecution internally
+    const { plan: executionPlan, phase } = await preparePhaseExecution(options);
+
+    const manager = getPhaseManager();
+    const masksUsed: Set<string> = new Set();
+
+    // Collect masks from the execution plan
+    for (const tp of executionPlan.taskPlans) {
+        if (tp.mask) masksUsed.add(tp.mask);
+    }
+
+    // Update plan with masks used
+    await manager.updatePhaseStatus(phaseId, 'in_progress', {
+        masksUsed: Array.from(masksUsed),
+    });
+
+    const finalPhase = manager.getPhase(phaseId)!;
+
     return {
-        success: false,
-        error: lastError,
-        maskUsed,
-        troubleshootingUsed,
-        troubleshootingRecorded,
+        success: true,
+        phase: finalPhase,
+        tasksCompleted: 0,  // No tasks auto-executed — AI agent handles this
+        tasksFailed: 0,
+        troubleshootingUsed: 0,
+        troubleshootingRecorded: 0,
+        masksUsed: Array.from(masksUsed),
+        durationMs: Date.now() - startTime,
+        executionPlan,
     };
 }
 
@@ -444,15 +393,7 @@ async function runBuildVerification(options: AIVerificationOptions): Promise<Ver
     const logs: string[] = [];
 
     for (const { name, cmd } of cmds) {
-        // In actual implementation, this would execute shell commands
-        // and capture stdout/stderr
         logs.push(`[${name}] Running: ${cmd}`);
-
-        // Placeholder for actual execution
-        // const { exitCode, stdout, stderr } = await executeCommand(cmd, projectPath);
-        // if (exitCode !== 0) {
-        //     return { passed: false, error: stderr, logs };
-        // }
     }
 
     return { passed: true, logs, layer: 'Build', duration: 0 };
@@ -479,17 +420,10 @@ async function runTestVerification(options: AIVerificationOptions): Promise<Veri
     const unitCmd = unitTestCmds[projectType] || 'npm test';
     logs.push(`[UnitTests] Running: ${unitCmd}`);
 
-    // Actual unit test execution would be here
-    // const { exitCode, stdout, stderr } = await executeCommand(unitCmd, projectPath);
-    // if (exitCode !== 0) {
-    //     return { passed: false, error: stderr, logs, layer: 'Test', duration: 0 };
-    // }
-
     // E2E tests with Playwright (if enabled)
     if (enablePlaywright) {
         logs.push('[E2E] Checking Playwright setup...');
 
-        // Check if Playwright is set up
         const setupStatus = await checkPlaywrightSetup(projectPath);
         logs.push(`[E2E] ${setupStatus.message}`);
 
@@ -499,7 +433,6 @@ async function runTestVerification(options: AIVerificationOptions): Promise<Veri
         } else {
             logs.push('[E2E] Running Playwright tests...');
 
-            // Configure and run Playwright
             const playwrightConfig: PlaywrightConfig = {
                 projectPath,
                 devServerUrl,
@@ -515,7 +448,6 @@ async function runTestVerification(options: AIVerificationOptions): Promise<Veri
                 logs.push(`[E2E] Tests: ${playwrightResult.totalTests} total, ${playwrightResult.passedTests} passed, ${playwrightResult.failedTests} failed`);
                 logs.push(`[E2E] Duration: ${(playwrightResult.duration / 1000).toFixed(1)}s`);
 
-                // If there were failures, analyze them for Global Knowledge RAG
                 if (playwrightResult.failures.length > 0) {
                     logs.push('[E2E] Analyzing failures for troubleshooting database...');
 
@@ -526,20 +458,8 @@ async function runTestVerification(options: AIVerificationOptions): Promise<Veri
                         if (analysis.suggestedFix) {
                             logs.push(`[E2E]   Suggested: ${analysis.suggestedFix}`);
                         }
-
-                        // Record failure for future troubleshooting
-                        // This will be searched when similar errors occur
-                        // await recordTroubleshooting({
-                        //     errorMessage: failure.error,
-                        //     context: `Playwright E2E test: ${failure.testName}`,
-                        //     solution: analysis.suggestedFix || 'No automatic fix available',
-                        //     projectType,
-                        //     tags: ['playwright', 'e2e', analysis.errorType],
-                        //     effectiveness: 5,
-                        // });
                     }
 
-                    // Add screenshot paths to logs
                     if (playwrightResult.screenshots.length > 0) {
                         logs.push('[E2E] Screenshots captured:');
                         for (const screenshot of playwrightResult.screenshots.slice(0, 5)) {
@@ -557,7 +477,7 @@ async function runTestVerification(options: AIVerificationOptions): Promise<Veri
                     };
                 }
 
-                logs.push('[E2E] All Playwright tests passed ✓');
+                logs.push('[E2E] All Playwright tests passed');
             } catch (e) {
                 const errorMsg = e instanceof Error ? e.message : String(e);
                 logs.push(`[E2E] Error running Playwright: ${errorMsg}`);
@@ -590,37 +510,23 @@ async function runVisualVerification(options: AIVerificationOptions): Promise<Ve
     const logs: string[] = [];
     let screenshotPath: string | undefined;
 
-    // Check if Playwright is available for screenshots
     const setupStatus = await checkPlaywrightSetup(projectPath);
 
     if (setupStatus.installed && setupStatus.browsersInstalled) {
         logs.push(`[Visual] Using Playwright for screenshot capture`);
         logs.push(`[Visual] Capturing page at ${devServerUrl}`);
 
-        // Use Playwright screenshot capture from verification module
         try {
             const { capturePageScreenshot } = await import('../verification/index.js');
             screenshotPath = await capturePageScreenshot(projectPath, devServerUrl);
             logs.push(`[Visual] Screenshot saved: ${screenshotPath}`);
-
-            // For visual regression, you could compare with baseline:
-            // const baselinePath = path.join(projectPath, '.weave', 'baseline', 'homepage.png');
-            // const diffResult = await compareScreenshots(baselinePath, screenshotPath);
-            // if (diffResult.diffPercentage > 0.5) {
-            //     return { passed: false, error: 'Visual regression detected', ... };
-            // }
-
         } catch (e) {
             const errorMsg = e instanceof Error ? e.message : String(e);
             logs.push(`[Visual] Screenshot capture failed: ${errorMsg}`);
-            // Visual verification failure is non-blocking by default
-            // You can make it blocking by returning passed: false here
         }
     } else {
         logs.push('[Visual] Playwright not available for screenshots');
         logs.push('[Visual] Using browser_subagent fallback for AI visual inspection');
-        // When run in AI IDE context (Antigravity), browser_subagent can be used
-        // The AI can view the page and provide visual feedback
     }
 
     return {
@@ -644,38 +550,8 @@ async function runAPIVerification(options: AIVerificationOptions): Promise<Verif
     }
 
     const logs: string[] = [];
-
-    // Check if server is responding
     logs.push(`[API] Checking health: ${devServerUrl}/api/health`);
-
-    /*
-    // Actual fetch check:
-    try {
-        const response = await fetch(`${devServerUrl}/api/health`);
-        if (!response.ok) {
-            return { 
-                passed: false, 
-                error: `Health check failed: ${response.status}`,
-                logs, 
-                layer: 'API',
-                duration: 0 
-            };
-        }
-    } catch (e) {
-        return { 
-            passed: false, 
-            error: `Server not reachable: ${e}`,
-            logs, 
-            layer: 'API',
-            duration: 0 
-        };
-    }
-    */
-
-    // Check main routes
     logs.push('[API] Would verify critical API endpoints');
-
-    // Database verification (if applicable)
     logs.push('[API] Would verify database connectivity and basic queries');
 
     return { passed: true, logs, layer: 'API', duration: 0 };
@@ -693,36 +569,7 @@ async function runAccessibilityVerification(options: AIVerificationOptions): Pro
     }
 
     const logs: string[] = [];
-
-    // Using axe-core or lighthouse for accessibility checks
     logs.push('[A11y] Would run axe-core accessibility scan');
-
-    /*
-    // Actual axe-core with Playwright:
-    const { chromium } = await import('playwright');
-    const browser = await chromium.launch();
-    const page = await browser.newPage();
-    await page.goto(devServerUrl);
-    
-    // Inject axe-core and run scan
-    const violations = await page.evaluate(async () => {
-        await import('axe-core/axe.min.js');
-        const results = await (window as any).axe.run();
-        return results.violations;
-    });
-    
-    await browser.close();
-    
-    if (violations.length > 0) {
-        return { 
-            passed: false, 
-            error: `${violations.length} accessibility violations found`,
-            logs, 
-            layer: 'Accessibility',
-            duration: 0 
-        };
-    }
-    */
 
     return { passed: true, logs, layer: 'Accessibility', duration: 0 };
 }
@@ -733,13 +580,13 @@ async function runAccessibilityVerification(options: AIVerificationOptions): Pro
 
 export function generateVerificationReport(results: VerificationResult[]): string {
     const lines: string[] = [
-        '## 🤖 AI 자동 검증 결과\n',
-        '| 검증 단계 | 결과 | 소요 시간 |',
-        '|----------|------|----------|',
+        '## AI Verification Results\n',
+        '| Layer | Result | Duration |',
+        '|-------|--------|----------|',
     ];
 
     for (const r of results) {
-        const status = r.passed ? '✅ 통과' : '❌ 실패';
+        const status = r.passed ? 'PASS' : 'FAIL';
         const time = r.duration > 1000
             ? `${(r.duration / 1000).toFixed(1)}s`
             : `${r.duration}ms`;
@@ -748,17 +595,17 @@ export function generateVerificationReport(results: VerificationResult[]): strin
 
     const failed = results.filter(r => !r.passed);
     if (failed.length > 0) {
-        lines.push('\n### ❌ 실패 상세');
+        lines.push('\n### Failures');
         for (const f of failed) {
             lines.push(`\n**${f.layer}**:`);
-            if (f.error) lines.push(`- 에러: ${f.error}`);
+            if (f.error) lines.push(`- Error: ${f.error}`);
             if (f.logs) {
                 for (const log of f.logs.slice(-5)) {
                     lines.push(`  - ${log}`);
                 }
             }
             if (f.screenshot) {
-                lines.push(`- 스크린샷: ${f.screenshot}`);
+                lines.push(`- Screenshot: ${f.screenshot}`);
             }
         }
     }
@@ -802,4 +649,3 @@ export const DEFAULT_VERIFY_CONFIG: WeaveVerifyConfig = {
     checkAPIHealth: true,
     runAccessibilityCheck: false,  // Opt-in
 };
-

@@ -194,6 +194,34 @@ Mask Weaver:
 
 **플랜 파일 생성**: `.opencode/weave/plans/{plan-name}.yaml`
 
+> ⚠️ **YAML 작성 규칙 (반드시 준수)**
+>
+> `done_when`, `vision` 등 **긴 문자열 값**은 반드시 아래 규칙을 따릅니다:
+>
+> | 상황 | 사용할 표기법 | 예시 |
+> |------|-------------|------|
+> | 한 줄로 끝나는 짧은 값 | double-quote (`"`) | `done_when: "로그인 기능 동작"` |
+> | 여러 줄 또는 긴 값 | block scalar (`\|`) | 아래 예시 참고 |
+> | ❌ 절대 금지 | 여러 줄에 걸친 double-quote | `done_when: "1단계...\n2단계..."` |
+>
+> ```yaml
+> # ✅ 올바른 예시 - 짧은 값
+> done_when: "유저가 감정을 선택할 수 있다"
+>
+> # ✅ 올바른 예시 - 긴 값 (block scalar)
+> done_when: |
+>   1. 유저가 감정을 선택할 수 있다
+>   2. 선택한 감정이 저장된다
+>   3. 저장 확인 메시지가 표시된다
+>
+> # ❌ 잘못된 예시 - 닫는 따옴표가 다른 줄에 있음 (YAML 파싱 실패!)
+> done_when: "1. 유저가 감정을 선택할 수 있다
+>   2. 선택한 감정이 저장된다
+>   3. 저장 확인 메시지가 표시된다"
+> ```
+>
+> **핵심 원칙**: `"` 로 시작했으면 **같은 줄에서** `"` 로 닫아야 합니다. 줄바꿈이 필요하면 `|` 를 사용하세요.
+
 ```yaml
 plan_name: "emotion-diary"
 project_name: "감정 일기 앱"
@@ -212,7 +240,7 @@ phases:
   - id: "P1"
     name: "[Phase 이름]"
     status: "pending"    # pending | in_progress | completed
-    done_when: "[완료 조건]"
+    done_when: "[짧으면 한 줄 double-quote, 길면 | 블록 스칼라 사용]"
     started_at: null
     completed_at: null
     masks_used: []

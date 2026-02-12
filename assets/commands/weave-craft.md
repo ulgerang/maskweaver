@@ -55,9 +55,17 @@ AI가 자동으로 검증 루프를 돌리고, 완료되면 유저에게 전달�
 ```
 0. LOAD PLAN (활성 플랜 + Phase 정보 로드)
    ↓
-1. UNDERSTAND (Phase 요구사항 확인)
+1. GENERATE EXECUTION PLAN (자동 분석)
+   ├─ 각 Task의 복잡도 판단 (simple/standard/complex)
+   ├─ 에이전트 티어 선택 (flash/human/premium)
+   ├─ 전문가 마스크 자동 선택
+   ├─ 글로벌 지식에서 트러블슈팅 힌트 검색
+   └─ 병렬 실행 가능 여부 분석
    ↓
-2. DESIGN (Task 분해 + 설계)
+2. DELEGATE (실행 계획에 따라 작업 위임)
+   ├─ simple  → dummy-flash  (빠르고 저렴)
+   ├─ standard → dummy-human  (범용)
+   └─ complex  → dummy-premium (강력한 추론)
    ↓
 3. BUILD + SELF-VERIFY LOOP
    ├─ 각 Task에 대해:
@@ -99,6 +107,29 @@ You are the **Mask Weaver**. During execution, your role is to **orchestrate exp
 ---
 
 ### 1. Task Complexity → Execution Strategy
+
+**The Orchestrator automatically assesses task complexity and selects the agent tier.**
+
+When `weave craft P1` is called, the system generates an execution plan like:
+
+```markdown
+## Phase P1: Emotion Selection UI
+
+### Execution Plan
+| # | Task              | Complexity | Agent Tier | Mask          |
+|---|-------------------|-----------|------------|---------------|
+| 1 | Update imports    | simple    | flash      | auto          |
+| 2 | Build component   | standard  | human      | dan-abramov   |
+| 3 | Auth refactoring  | complex   | premium    | martin-fowler |
+```
+
+**Agent Tier Selection Rules:**
+
+| Complexity | Agent Tier | Use When |
+|-----------|------------|----------|
+| simple | `dummy-flash` | File renames, import fixes, formatting, config changes, lint fixes |
+| standard | `dummy-human` | Component implementation, API endpoints, tests, validation |
+| complex | `dummy-premium` | Architecture refactoring, debugging, auth, state management, performance |
 
 #### Handle Directly (Simple Tasks)
 
@@ -176,15 +207,18 @@ Mask Weaver:
 ### 3. Execution Decision Flow
 
 ```
-Analyze Task
+Execution Plan Generated (automatic)
     ↓
-Can you finish in 5 minutes?
-    ├─ YES → Handle directly
-    └─ NO → Single focused task?
-               ├─ YES → Summon domain expert
-               └─ NO → Multiple independent tasks?
-                          ├─ YES → Squad parallel
-                          └─ NO → Sequential expert delegation
+For each task in plan:
+    ↓
+Check Agent Tier:
+    ├─ flash (simple) → Handle directly or Task(dummy-flash)
+    ├─ human (standard) → Task(dummy-human) with mask
+    └─ premium (complex) → Task(dummy-premium) with mask
+    ↓
+Multiple independent tasks in same wave?
+    ├─ YES → Run in parallel (Squad system)
+    └─ NO → Run sequentially
 ```
 
 ---
@@ -237,13 +271,24 @@ Stuck on performance issue:
 
 ## Step 4: UPDATE PLAN
 
-Phase 완료 시 플랜 파일을 업데이트합니다:
+Phase 완료 시 플랜 파일을 업데이트합니다.
+
+> ⚠️ **YAML 작성 규칙 (반드시 준수)**
+>
+> 플랜 YAML을 직접 수정할 때, `done_when` 등 문자열 값은 반드시 아래 규칙을 따릅니다:
+>
+> - **짧은 값** (한 줄): double-quote 사용 → `done_when: "로그인 기능 동작"`
+> - **긴 값** (여러 줄): block scalar(`|`) 사용 → `done_when: |` 후 들여쓰기된 내용
+> - **❌ 절대 금지**: double-quote(`"`)로 시작한 문자열을 다른 줄에서 닫는 것
+>
+> **핵심**: `"` 로 시작했으면 **같은 줄에서** `"` 로 닫기. 줄바꿈이 필요하면 `|` 사용.
 
 ```yaml
 # .opencode/weave/plans/{active_plan}.yaml 내 해당 Phase 업데이트:
 phases:
   - id: "P1"
     status: "completed"         # pending → in_progress → completed
+    done_when: "유저가 감정을 선택할 수 있다"  # 짧으면 한 줄 quote
     started_at: "2026-02-06T10:30:00"
     completed_at: "2026-02-06T13:00:00"
     masks_used:

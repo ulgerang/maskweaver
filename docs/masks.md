@@ -1,5 +1,9 @@
 # Masks Guide
 
+> How to create, customize, and use expert persona masks in Maskweaver. Includes the YAML schema, available built-in masks, and best practices.
+>
+> See also: [Configuration](configuration.md) | [Installation](installation.md)
+
 Complete guide to creating and using expert personas (masks) in Maskweaver.
 
 ---

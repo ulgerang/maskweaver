@@ -13,6 +13,7 @@ import { Command } from "commander";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { VERSION } from "../version.js";
 
 // ============================================================================
 // Constants
@@ -272,7 +273,7 @@ async function showStatus(options: { local?: boolean }) {
     if (globalInstalled || localInstalled) {
       log(`ℹ️  플러그인 정보:`, "cyan");
       log(`   이름: ${PLUGIN_NAME}`, "dim");
-      log(`   버전: 0.4.0`, "dim");
+      log(`   버전: ${VERSION}`, "dim");
       log("");
     }
 
@@ -298,8 +299,8 @@ const program = new Command();
 
 program
   .name("maskweaver")
-  .version("0.4.0")
-  .description("🎭 Maskweaver Plugin Installer for OpenCode");
+  .version(VERSION)
+  .description(`🎭 Maskweaver Plugin Installer for OpenCode (v${VERSION})`);
 
 program
   .command("install")

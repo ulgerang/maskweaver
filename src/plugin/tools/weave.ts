@@ -8,6 +8,7 @@
 import { tool } from '@opencode-ai/plugin';
 const z = tool.schema;
 
+import { VERSION } from '../../version.js';
 import { intake } from '../../weave/stages/intake.js';
 import { plan } from '../../weave/stages/plan.js';
 import { execute, preparePhaseExecution, formatExecutionPlan } from '../../weave/stages/execute.js';
@@ -308,10 +309,19 @@ async function handleApprove(args: { phaseId?: string }): Promise<string> {
 }
 
 function getHelpMessage(): string {
-    return `## Weave Workflow Help
+    return `## Weave Workflow Help (Maskweaver v${VERSION})
 
 **Weave** is Maskweaver's Phase-Driven Development workflow.
 "AI verifies, User confirms"
+
+### Version
+
+\`Maskweaver v${VERSION}\`
+
+To check installed version:
+- CLI: \`maskweaver --version\`
+- In chat: use \`maskweaver_status\` tool
+- npm: \`npm list maskweaver\`
 
 ### Commands
 
@@ -323,6 +333,7 @@ function getHelpMessage(): string {
 | \`weave repair\` | Scan and auto-repair corrupted plan YAML files |
 | \`weave troubleshoot [error]\` | Search global knowledge for solutions |
 | \`weave record [solution]\` | Record a new solution |
+| \`weave help\` | Show this help |
 
 ### Key Features
 

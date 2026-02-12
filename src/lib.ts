@@ -4,6 +4,9 @@
  * Library exports for programmatic usage.
  */
 
+// Version
+export { VERSION, getVersionString } from "./version.js";
+
 // Core: Schema, validation, prompt builder
 export * as core from "./core/index.js";
 

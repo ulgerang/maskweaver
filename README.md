@@ -99,6 +99,30 @@ OpenCode automatically installs the plugin to `~/.cache/opencode/node_modules/` 
 
 **Windows:** `%USERPROFILE%\.config\opencode\opencode.json`
 
+### Checking Installed Version
+
+Multiple ways to verify your Maskweaver version:
+
+```bash
+# CLI (terminal)
+maskweaver --version
+# or
+maskweaver -V
+
+# npm
+npm list maskweaver
+
+# In OpenCode chat
+# Use the maskweaver_status tool or type:
+/weave help
+```
+
+```typescript
+// Programmatic (Node.js / TypeScript)
+import { VERSION } from 'maskweaver';
+console.log(VERSION); // "0.7.29"
+```
+
 ---
 
 ## Quick Start

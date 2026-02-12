@@ -1,5 +1,9 @@
 # Contributing to Maskweaver
 
+> Guidelines for contributing masks, translations, bug fixes, and new features to the Maskweaver project.
+>
+> Repository: [github.com/ulgerang/maskweaver](https://github.com/ulgerang/maskweaver)
+
 Thank you for your interest in contributing to Maskweaver! 🎭
 
 ## Ways to Contribute

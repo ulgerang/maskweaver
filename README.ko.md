@@ -80,6 +80,30 @@ OpenCode가 시작 시 자동으로 `~/.cache/opencode/node_modules/`에 플러�
 
 **Windows:** `%USERPROFILE%\.config\opencode\opencode.json`
 
+### 설치된 버전 확인
+
+Maskweaver 버전을 확인하는 여러 방법:
+
+```bash
+# CLI (터미널)
+maskweaver --version
+# 또는
+maskweaver -V
+
+# npm
+npm list maskweaver
+
+# OpenCode 채팅 내에서
+# maskweaver_status 도구를 사용하거나:
+/weave help
+```
+
+```typescript
+// 프로그래밍 방식 (Node.js / TypeScript)
+import { VERSION } from 'maskweaver';
+console.log(VERSION); // "0.7.29"
+```
+
 ---
 
 ## 빠른 시작

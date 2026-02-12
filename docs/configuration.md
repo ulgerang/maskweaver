@@ -1,5 +1,9 @@
 # Configuration Guide
 
+> Complete reference for configuring Maskweaver — model pools, memory providers, context tracking, retrospection, verification, and Weave workflow settings.
+>
+> See also: [Installation](installation.md) | [Masks](masks.md)
+
 Complete guide to configuring Maskweaver for your needs.
 
 ---

@@ -13,6 +13,20 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 
 ---
 
+## 버전 확인
+
+설치된 Maskweaver 버전을 확인하는 방법:
+
+| 방법 | 명령어 |
+|------|--------|
+| CLI | `maskweaver --version` 또는 `maskweaver -V` |
+| npm | `npm list maskweaver` |
+| 채팅 내 | `maskweaver_status` 도구 사용 |
+| Weave | `/weave help` |
+| Node.js | `import { VERSION } from 'maskweaver'` |
+
+---
+
 ## 핵심 철학
 
 ```

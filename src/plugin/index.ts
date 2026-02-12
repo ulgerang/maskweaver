@@ -1,8 +1,6 @@
 /**
 * Maskweaver Plugin for opencode
 * 
-* v0.6.0 - Memory, Context, and Retrospect tools integration
-* 
 * Key features:
 * - Configuration-driven tool activation/deactivation
 * - Auto-activation of default masks
@@ -21,6 +19,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
+import { VERSION } from '../version.js';
 import {
   loadPluginConfig,
   isMaskEnabled,
@@ -563,7 +562,7 @@ function createListMasksTool(maskLoader: MaskLoader, activeMask: () => LoadedMas
         }
 
         const lines: string[] = [];
-        lines.push(`Maskweaver v0.6.0 - ${filtered.length} masks available`);
+        lines.push(`Maskweaver v${VERSION} - ${filtered.length} masks available`);
         const active = activeMask();
         lines.push(`Active mask: ${active?.metadata.id || 'none'}`);
         lines.push('');
@@ -686,7 +685,7 @@ function createMaskweaverStatusTool(
       }
 
       const active = activeMask();
-      return `Maskweaver v0.6.0
+      return `Maskweaver v${VERSION}
 Masks directory: ${masksDir}
 Available: ${maskLoader ? 'yes' : 'no'}
 Total masks: ${masksCount}
@@ -878,7 +877,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
   client.app.log({
     service: 'maskweaver',
     level: 'info',
-    message: `Maskweaver plugin loaded v0.6.0 (oh-my-opencode pattern)`,
+    message: `Maskweaver plugin loaded v${VERSION}`,
   });
 
   if (fs.existsSync(masksDir)) {

@@ -1,5 +1,9 @@
 # Installation
 
+> Complete guide to installing and verifying Maskweaver — the AI Expert Persona System for [OpenCode](https://github.com/sst/opencode).
+>
+> **Quick version check**: `maskweaver --version` or `npm list maskweaver`
+
 ## For Humans
 
 Paste this into your LLM agent session (Claude Code, AmpCode, Cursor, etc.):
@@ -103,7 +107,7 @@ Done! Skip to [Verification](#verification).
 
 ---
 
-## What Gets Installed (v0.4.0+)
+## What Gets Installed
 
 When the plugin loads, it **automatically creates** these files in your project's `.opencode/` directory:
 
@@ -475,7 +479,28 @@ const feature = await createFeature({
 
 After installation:
 
-### 1. Check Plugin is Loaded
+### 1. Check Installed Version
+
+```bash
+# CLI (if installed globally or via npx)
+maskweaver --version
+# or
+maskweaver -V
+
+# npm
+npm list maskweaver
+
+# In OpenCode chat - use the maskweaver_status tool
+# or type /weave help to see version info
+```
+
+```typescript
+// Programmatic (Node.js / TypeScript)
+import { VERSION } from 'maskweaver';
+console.log(VERSION);
+```
+
+### 2. Check Plugin is Loaded
 
 Start OpenCode and check for Maskweaver:
 

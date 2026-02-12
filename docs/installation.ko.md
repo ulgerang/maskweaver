@@ -1,6 +1,8 @@
 # 설치 가이드
 
-Maskweaver의 완전한 설치 방법입니다.
+> Maskweaver — AI 전문가 페르소나 시스템을 [OpenCode](https://github.com/sst/opencode)에 설치하고 확인하는 완전한 가이드입니다.
+>
+> **빠른 버전 확인**: `maskweaver --version` 또는 `npm list maskweaver`
 
 ---
 
@@ -451,6 +453,28 @@ memory: {
 ## 설치 확인
 
 설치 후 모든 것이 작동하는지 확인:
+
+### 0. 버전 확인
+
+```bash
+# CLI (전역 설치 또는 npx 사용 시)
+maskweaver --version
+# 또는
+maskweaver -V
+
+# npm
+npm list maskweaver
+
+# OpenCode 채팅 내에서
+# maskweaver_status 도구를 사용하거나
+# /weave help 를 입력하면 버전 정보가 표시됩니다
+```
+
+```typescript
+// 프로그래밍 방식 (Node.js / TypeScript)
+import { VERSION } from 'maskweaver';
+console.log(VERSION);
+```
 
 ### 1. 패키지 설치 확인
 

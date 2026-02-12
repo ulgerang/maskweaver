@@ -12,9 +12,11 @@
 * Based on oh-my-opencode plugin development patterns.
 */
 
-import { tool } from '@opencode-ai/plugin/tool';
 import type { Plugin } from '@opencode-ai/plugin';
-const z = tool.schema;
+import { z } from 'zod';
+// Inline shim: tool() is just an identity function in @opencode-ai/plugin
+// We inline it to avoid bundler resolution bugs with the upstream package
+const tool = <T>(input: T): T => input;
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';

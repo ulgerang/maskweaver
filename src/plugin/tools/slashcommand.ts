@@ -10,8 +10,9 @@
  * 3. Project .opencode/commands/ folder (overrides)
  */
 
-import { tool } from '@opencode-ai/plugin/tool';
-const z = tool.schema;
+import { z } from 'zod';
+// Inline shim: tool() is just an identity function in @opencode-ai/plugin
+const tool = <T>(input: T): T => input;
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';

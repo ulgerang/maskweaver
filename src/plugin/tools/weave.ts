@@ -5,8 +5,9 @@
  * Commands: design, craft, status
  */
 
-import { tool } from '@opencode-ai/plugin/tool';
-const z = tool.schema;
+import { z } from 'zod';
+// Inline shim: tool() is just an identity function in @opencode-ai/plugin
+const tool = <T>(input: T): T => input;
 
 import { VERSION } from '../../version.js';
 import { intake } from '../../weave/stages/intake.js';

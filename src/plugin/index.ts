@@ -12,11 +12,34 @@
 * Based on oh-my-opencode plugin development patterns.
 */
 
-import type { Plugin } from '@opencode-ai/plugin';
 import { z } from 'zod';
+
 // Inline shim: tool() is just an identity function in @opencode-ai/plugin
 // We inline it to avoid bundler resolution bugs with the upstream package
 const tool = <T>(input: T): T => input;
+
+// Local type definition for Plugin to avoid @opencode-ai/plugin import issues
+interface PluginContext {
+  client: {
+    app: {
+      log(entry: { service: string; level: 'debug' | 'info' | 'warn' | 'error'; message: string }): void;
+    };
+  };
+  directory: string;
+}
+
+interface PluginEvent {
+  type: string;
+  [key: string]: unknown;
+}
+
+type Plugin = (context: PluginContext) => Promise<{
+  agent?: Record<string, unknown>;
+  'experimental.chat.system.transform'?: (input: unknown, output: { system?: string[] }) => Promise<void>;
+  tool?: Record<string, unknown>;
+  event?: (context: { event: PluginEvent }) => Promise<void>;
+  config?: (config: unknown) => Promise<void>;
+}>;
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';

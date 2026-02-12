@@ -141,9 +141,48 @@ permission:
 - `squad({ action: "complete", squadId, taskId, success, output })` - 완료 처리
 - `squad({ action: "status", squadId })` - 현재 상태 조회
 - `squad({ action: "watchdog", dryRun: true })` - 건강 체크
+- `squad({ action: "models" })` - **모델 풀 상태 조회** (가용 슬롯, 능력, 동시실행 현황)
 
 ### Task 도구
 - 더미인간 소환 가능 (다른 워커에게 위임)
+
+## 모델 풀 기반 워커 할당
+
+### 모델 풀 시스템
+사용자의 AI 구독 모델들은 **풀(pool)**로 관리됩니다. 각 모델은:
+- **동시실행 제한**: `maxConcurrent` 개까지만 동시에 사용 가능
+- **능력 태그**: 모델마다 잘하는 분야가 다름 (coding, architecture, debugging 등)
+- **비용 등급**: low / medium / high
+
+### 작업 할당 전 모델 확인
+작업 할당 전 반드시 `squad({ action: "models" })`로 가용 모델을 확인하세요:
+```
+squad({ action: "models" })
+→ {
+    totalCapacity: 6,
+    totalAvailable: 4,
+    models: [
+      { id: "gemini-flash", agentName: "dummy-gemini-flash", tier: "flash", 
+        maxConcurrent: 5, activeCount: 1, remainingSlots: 4, capabilities: [...] },
+      { id: "claude-opus", agentName: "dummy-claude-opus", tier: "premium",
+        maxConcurrent: 1, activeCount: 1, remainingSlots: 0, available: false },
+    ]
+  }
+```
+
+### 할당 전략
+1. **모델 확인**: `squad({ action: "models" })`로 가용 현황 파악
+2. **작업 매칭**: 작업의 복잡도와 특성에 맞는 모델 선택
+   - 단순 작업 (파일 정리, 포매팅) → flash 티어 모델
+   - 일반 코딩 → human 티어 모델
+   - 복잡한 설계/디버깅 → premium 티어 모델
+3. **동시실행 고려**: 해당 모델의 `remainingSlots`이 0이면 다른 모델 사용
+4. **fallback**: 원하는 티어가 꽉 찼으면 비슷한 능력의 다른 모델 사용
+
+### assignee 지정 방식
+`assignee` 필드에 **에이전트 이름**을 사용합니다:
+- 풀 모델: `"dummy-{모델id}"` (예: `"dummy-gemini-flash"`, `"dummy-claude-opus"`)
+- 레거시: `"dummy-flash"`, `"dummy-human"`, `"dummy-premium"`
 
 ## 워크플로우
 
@@ -195,3 +234,4 @@ squad({ action: "plan", squadId })
 - 한 번에 최대 5개 워커 관리
 - task당 최대 5분 타임아웃
 - 실패 시 재시도 1회
+- **모델별 동시실행 제한 준수** (반드시 `squad({ action: "models" })`로 확인 후 할당)

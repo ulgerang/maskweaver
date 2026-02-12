@@ -178,11 +178,99 @@ export interface RuntimeMemoryConfig {
   baseUrl?: string;
 }
 
+// ============================================================================
+// Model Pool Types (for dummyHumans.pool)
+// ============================================================================
+
+/** Cost tier for budget-aware scheduling */
+export type ModelCostTier = 'low' | 'medium' | 'high';
+
+/** Agent tier mapping */
+export type ModelTier = 'flash' | 'human' | 'premium';
+
+/** Known capability tags for task-model matching */
+export type ModelCapability =
+  | 'search' | 'formatting' | 'simple-coding' | 'file-ops'
+  | 'coding' | 'testing' | 'refactoring'
+  | 'architecture' | 'debugging' | 'reasoning' | 'complex-coding'
+  | 'frontend' | 'backend' | 'database' | 'devops' | 'ml'
+  | string; // extensible
+
+/**
+ * A single model entry in the pool.
+ * Each entry represents one AI model subscription the user has access to.
+ */
+export interface ModelPoolEntry {
+  /** Unique identifier for this model slot (e.g., "gemini-flash", "claude-opus") */
+  id: string;
+  /** Full model name as used by the provider (e.g., "google/antigravity-gemini-3-flash") */
+  model: string;
+  /** Which agent tier this model maps to */
+  tier: ModelTier;
+  /** Maximum concurrent uses allowed (API/subscription limit) */
+  maxConcurrent: number;
+  /** Task capabilities this model excels at */
+  capabilities: ModelCapability[];
+  /** Cost tier for budget-aware scheduling */
+  costTier: ModelCostTier;
+  /** Human-readable description */
+  description?: string;
+}
+
+/**
+ * DummyHumans configuration.
+ * Supports two formats:
+ * - Legacy: Record<string, string> mapping tier names to model IDs
+ * - Pool:   { pool: ModelPoolEntry[] } with detailed model definitions
+ */
+export type DummyHumansConfig =
+  | Record<string, string>                   // Legacy format
+  | { pool: ModelPoolEntry[] };              // Pool format
+
+/** Type guard for pool format */
+export function isPoolConfig(config: DummyHumansConfig): config is { pool: ModelPoolEntry[] } {
+  return 'pool' in config && Array.isArray((config as any).pool);
+}
+
+/**
+ * Normalize legacy config to pool entries.
+ * Converts { flash: "model-a", human: "model-b", premium: "model-c" }
+ * into ModelPoolEntry[] with sensible defaults.
+ */
+export function normalizeDummyHumansConfig(config: DummyHumansConfig): ModelPoolEntry[] {
+  // Defensive guard: if called with null/undefined at runtime, return empty
+  if (!config || typeof config !== 'object') {
+    return [];
+  }
+
+  if (isPoolConfig(config)) {
+    return config.pool;
+  }
+
+  // Legacy format → convert to pool entries
+  const tierDefaults: Record<string, { tier: ModelTier; costTier: ModelCostTier; maxConcurrent: number; capabilities: ModelCapability[] }> = {
+    flash:   { tier: 'flash',   costTier: 'low',    maxConcurrent: 5, capabilities: ['search', 'formatting', 'simple-coding', 'file-ops'] },
+    human:   { tier: 'human',   costTier: 'medium', maxConcurrent: 2, capabilities: ['coding', 'testing', 'refactoring'] },
+    premium: { tier: 'premium', costTier: 'high',   maxConcurrent: 1, capabilities: ['architecture', 'debugging', 'reasoning', 'complex-coding'] },
+  };
+
+  const entries: ModelPoolEntry[] = [];
+  for (const [key, model] of Object.entries(config)) {
+    const defaults = tierDefaults[key] ?? { tier: 'human' as ModelTier, costTier: 'medium' as ModelCostTier, maxConcurrent: 2, capabilities: ['coding'] };
+    entries.push({
+      id: key,
+      model,
+      ...defaults,
+    });
+  }
+  return entries;
+}
+
 /**
  * Runtime configuration from maskweaver.config.json
  */
 export interface RuntimeConfig {
-  dummyHumans?: Record<string, string>;
+  dummyHumans?: DummyHumansConfig;
   memory?: RuntimeMemoryConfig;
   language?: string;
 }

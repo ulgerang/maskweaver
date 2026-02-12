@@ -1,8 +1,25 @@
 {
   "dummyHumans": {
-    "flash": "google/antigravity-gemini-3-flash",
-    "human": "google/antigravity-claude-opus-4-5-thinking",
-    "premium": "google/antigravity-claude-opus-4-5-thinking"
+    "pool": [
+      {
+        "id": "gemini-flash",
+        "model": "google/antigravity-gemini-3-flash",
+        "tier": "flash",
+        "maxConcurrent": 5,
+        "capabilities": ["search", "formatting", "simple-coding", "file-ops"],
+        "costTier": "low",
+        "description": "Fast and cheap. Simple tasks, file ops, search."
+      },
+      {
+        "id": "claude-opus",
+        "model": "google/antigravity-claude-opus-4-5-thinking",
+        "tier": "premium",
+        "maxConcurrent": 1,
+        "capabilities": ["architecture", "debugging", "reasoning", "complex-coding", "refactoring"],
+        "costTier": "high",
+        "description": "Most powerful. Architecture, complex debugging, reasoning."
+      }
+    ]
   },
   "memory": {
     "provider": "ollama",

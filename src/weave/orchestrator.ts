@@ -5,7 +5,11 @@
  * This is the "brain" that decides which persona to wear for each task.
  */
 
-import type { WeaveTask, WeaveConfig } from './types.js';
+import type { WeaveTask, WeaveConfig, AgentTier, TaskComplexity, TaskExecutionPlan, PhaseExecutionPlan } from './types.js';
+import type { WeavePhase } from './types.js';
+import { searchTroubleshooting } from './knowledge/global.js';
+import { getModelRegistry } from '../shared/model-registry.js';
+import type { ModelCapability, ModelTier } from '../shared/config.js';
 
 // ============================================================================
 // Task Type Detection
@@ -188,6 +192,252 @@ export class WeaveOrchestrator {
      */
     getConfig(): WeaveConfig {
         return { ...this.config };
+    }
+
+    // ========================================================================
+    // Task Complexity Assessment
+    // ========================================================================
+
+    /**
+     * Complexity signal patterns.
+     * Each pattern adds to a complexity score when matched.
+     */
+    private static readonly COMPLEXITY_SIGNALS: { pattern: RegExp; weight: number }[] = [
+        // High complexity signals (+2)
+        { pattern: /architect/i, weight: 2 },
+        { pattern: /refactor/i, weight: 2 },
+        { pattern: /design pattern/i, weight: 2 },
+        { pattern: /migration/i, weight: 2 },
+        { pattern: /state management/i, weight: 2 },
+        { pattern: /authentication|authorization|auth/i, weight: 2 },
+        { pattern: /performance|optimi[sz]/i, weight: 2 },
+        { pattern: /concurrency|parallel|async/i, weight: 2 },
+        { pattern: /debug|troubleshoot|diagnos/i, weight: 2 },
+        { pattern: /security|encrypt|vulnerab/i, weight: 2 },
+        { pattern: /algorithm|data structure/i, weight: 2 },
+
+        // Medium complexity signals (+1)
+        { pattern: /component/i, weight: 1 },
+        { pattern: /api|endpoint|route/i, weight: 1 },
+        { pattern: /test|spec/i, weight: 1 },
+        { pattern: /database|query|schema/i, weight: 1 },
+        { pattern: /hook|context|provider/i, weight: 1 },
+        { pattern: /middleware/i, weight: 1 },
+        { pattern: /validation/i, weight: 1 },
+        { pattern: /integrate/i, weight: 1 },
+    ];
+
+    /**
+     * Simple task patterns — if matched, override to simple.
+     */
+    private static readonly SIMPLE_PATTERNS: RegExp[] = [
+        /rename|renames/i,
+        /import|imports/i,
+        /format|formatting|prettier/i,
+        /typo|spelling/i,
+        /config|configuration file/i,
+        /comment|documentation/i,
+        /remove unused/i,
+        /update version/i,
+        /add export/i,
+        /fix lint/i,
+    ];
+
+    /**
+     * Assess complexity of a task based on its name/description.
+     * Returns: simple (score 0), standard (score 1-2), complex (score 3+)
+     */
+    assessComplexity(taskDescription: string): TaskComplexity {
+        // Check for explicit simple patterns first
+        for (const pattern of WeaveOrchestrator.SIMPLE_PATTERNS) {
+            if (pattern.test(taskDescription)) {
+                return 'simple';
+            }
+        }
+
+        let score = 0;
+        for (const { pattern, weight } of WeaveOrchestrator.COMPLEXITY_SIGNALS) {
+            if (pattern.test(taskDescription)) {
+                score += weight;
+            }
+        }
+
+        if (score >= 3) return 'complex';
+        if (score >= 1) return 'standard';
+        return 'simple';
+    }
+
+    /**
+     * Select the appropriate agent tier based on task complexity.
+     *
+     * Strategy:
+     * - simple   -> dummy-flash   (fast, cheap: file renames, formatting, config)
+     * - standard -> dummy-human   (balanced: component implementation, API endpoints)
+     * - complex  -> dummy-premium (powerful: architecture, debugging, multi-step reasoning)
+     */
+    selectAgentTier(complexity: TaskComplexity): AgentTier {
+        switch (complexity) {
+            case 'simple':
+                return 'dummy-flash';
+            case 'standard':
+                return 'dummy-human';
+            case 'complex':
+                return 'dummy-premium';
+        }
+    }
+
+    // ========================================================================
+    // Model Pool Integration
+    // ========================================================================
+
+    /** Map TaskType to ModelCapability tags for pool-based selection */
+    private static readonly TASK_TYPE_CAPABILITIES: Record<TaskType, ModelCapability[]> = {
+        architecture: ['architecture', 'reasoning', 'complex-coding'],
+        testing:      ['testing', 'coding'],
+        frontend:     ['frontend', 'coding'],
+        backend:      ['backend', 'coding'],
+        performance:  ['debugging', 'reasoning'],
+        database:     ['database', 'backend'],
+        ml:           ['ml', 'reasoning'],
+        devops:       ['devops', 'file-ops'],
+        general:      ['coding'],
+    };
+
+    /** Map complexity to ModelTier for pool queries */
+    private static readonly COMPLEXITY_TIER_MAP: Record<TaskComplexity, ModelTier> = {
+        simple:   'flash',
+        standard: 'human',
+        complex:  'premium',
+    };
+
+    /**
+     * Select the best available agent from the model pool.
+     * This considers:
+     * 1. Task complexity -> preferred tier
+     * 2. Task type -> required capabilities
+     * 3. Model availability -> concurrency limits
+     * 4. Cost awareness -> prefer cheaper when possible
+     *
+     * Returns the agent name to use (e.g., "dummy-gemini-flash")
+     * or falls back to the legacy tier name (e.g., "dummy-flash")
+     */
+    selectAgentFromPool(task: WeaveTask): { agentName: string; tier: AgentTier; poolManaged: boolean } {
+        const complexity = this.assessComplexity(task.name);
+        const defaultTier = this.selectAgentTier(complexity);
+        const taskType = this.detectTaskType(task.name);
+
+        try {
+            const registry = getModelRegistry();
+            const pool = registry.getPool();
+
+            // If no pool configured, fall back to legacy
+            if (pool.length === 0) {
+                return { agentName: defaultTier, tier: defaultTier, poolManaged: false };
+            }
+
+            const preferredModelTier = WeaveOrchestrator.COMPLEXITY_TIER_MAP[complexity];
+            const requiredCapabilities = WeaveOrchestrator.TASK_TYPE_CAPABILITIES[taskType] || ['coding'];
+
+            const result = registry.acquire({
+                tier: preferredModelTier,
+                capabilities: requiredCapabilities,
+                preferCheap: complexity === 'simple',
+            });
+
+            if (result.success && result.agentName) {
+                return {
+                    agentName: result.agentName,
+                    tier: defaultTier,
+                    poolManaged: true,
+                };
+            }
+
+            // Pool exhausted -- fall back to legacy tier name
+            return { agentName: defaultTier, tier: defaultTier, poolManaged: false };
+        } catch {
+            // Registry not initialized -- fall back to legacy
+            return { agentName: defaultTier, tier: defaultTier, poolManaged: false };
+        }
+    }
+
+    /**
+     * Release a model back to the pool after task completion.
+     */
+    releaseAgent(agentName: string): boolean {
+        try {
+            const registry = getModelRegistry();
+            // Agent name format: "dummy-{modelId}"
+            const modelId = agentName.replace(/^dummy-/, '');
+            return registry.release(modelId);
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Generate execution plan for a phase.
+     * Analyzes each task and determines:
+     * 1. Which expert mask to use
+     * 2. Which agent tier (model) to delegate to
+     * 3. Any relevant troubleshooting hints from global knowledge
+     */
+    async generateExecutionPlan(phase: WeavePhase, options?: {
+        projectType?: string;
+    }): Promise<PhaseExecutionPlan> {
+        const taskPlans: TaskExecutionPlan[] = [];
+
+        for (const task of phase.tasks) {
+            const mask = this.selectMaskForTask(task);
+            const complexity = this.assessComplexity(task.name);
+            const agentTier = this.selectAgentTier(complexity);
+
+            // Pre-fetch troubleshooting hints for known error patterns
+            let troubleshootingHints: string[] = [];
+            if (this.config.globalKnowledge) {
+                try {
+                    const solutions = await searchTroubleshooting(
+                        task.name,
+                        { projectType: options?.projectType, limit: 2 }
+                    );
+                    troubleshootingHints = solutions
+                        .filter(s => s.score > 0.5)
+                        .map(s => s.entry.solution.slice(0, 200));
+                } catch {
+                    // Knowledge search is best-effort
+                }
+            }
+
+            taskPlans.push({
+                task,
+                mask,
+                agentTier,
+                complexity,
+                troubleshootingHints,
+            });
+        }
+
+        // Generate human-readable summary
+        const tierCounts = { flash: 0, human: 0, premium: 0 };
+        for (const p of taskPlans) {
+            if (p.agentTier === 'dummy-flash') tierCounts.flash++;
+            else if (p.agentTier === 'dummy-human') tierCounts.human++;
+            else tierCounts.premium++;
+        }
+
+        const summaryParts: string[] = [];
+        summaryParts.push(`Phase ${phase.id}: ${phase.name}`);
+        summaryParts.push(`Tasks: ${taskPlans.length} total`);
+        if (tierCounts.flash > 0) summaryParts.push(`  flash: ${tierCounts.flash} (simple)`);
+        if (tierCounts.human > 0) summaryParts.push(`  human: ${tierCounts.human} (standard)`);
+        if (tierCounts.premium > 0) summaryParts.push(`  premium: ${tierCounts.premium} (complex)`);
+
+        return {
+            phaseId: phase.id,
+            phaseName: phase.name,
+            status: phase.status,
+            taskPlans,
+            summary: summaryParts.join('\n'),
+        };
     }
 
     /**

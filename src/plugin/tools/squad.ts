@@ -15,6 +15,7 @@ import { z } from "zod";
 import type { ToolFactory, ToolContext } from '../types.js';
 import * as shared from '../../shared-context/index.js';
 import { join } from "path";
+import { getModelRegistry } from '../../shared/model-registry.js';
 
 // ============================================================================
 // Schema Definition
@@ -30,7 +31,8 @@ export const squadSchema = z.object({
     "status",     // View session/squad status
     "watchdog",   // Run watchdog (dryRun optional)
     "list",       // List all squads
-    "plan"        // Analyze task dependencies and create parallel execution plan
+    "plan",       // Analyze task dependencies and create parallel execution plan
+    "models"      // Query available models and their concurrency status
   ]).describe("Action to execute"),
   
   // start action params
@@ -232,6 +234,7 @@ Direct use of assign/update/complete by primary agent pollutes strategic context
 - \`watchdog\`: Run timeout watchdog (dryRun optional)
     - \`list\`: List all squads in session
     - \`plan\`: Analyze task dependencies and create parallel execution plan (squadId required)
+    - \`models\`: Query available models, their capabilities, and concurrency status
 
 **Examples:**
 - Start session: action="start", goal="Implement OAuth login"
@@ -273,10 +276,13 @@ Direct use of assign/update/complete by primary agent pollutes strategic context
           case "plan":
             return await handlePlan(basePath, args.squadId);
 
+          case "models":
+            return await handleModels();
+
           default:
             return errorResponse(
               args.action,
-              `Unknown action. Available: start, squad, assign, update, complete, status, watchdog, list`
+              `Unknown action. Available: start, squad, assign, update, complete, status, watchdog, list, plan, models`
             );
         }
       } catch (error) {
@@ -651,4 +657,50 @@ async function handleList(basePath: string): Promise<string> {
     counts,
     squads,
   });
+}
+
+// ============================================================================
+// Models Handler - Query model pool status
+// ============================================================================
+
+/**
+ * Show available models and their concurrency status.
+ * Used by Squad Operator to make informed assignee decisions.
+ */
+async function handleModels(): Promise<string> {
+  try {
+    const registry = getModelRegistry();
+    const status = registry.getStatus();
+
+    const modelDetails = status.models.map(m => ({
+      id: m.entry.id,
+      agentName: `dummy-${m.entry.id}`,
+      model: m.entry.model,
+      tier: m.entry.tier,
+      capabilities: m.entry.capabilities,
+      costTier: m.entry.costTier,
+      maxConcurrent: m.entry.maxConcurrent,
+      activeCount: m.activeCount,
+      remainingSlots: m.remainingSlots,
+      available: m.available,
+      description: m.entry.description || '',
+    }));
+
+    // Group by tier
+    const byTier: Record<string, typeof modelDetails> = {};
+    for (const m of modelDetails) {
+      (byTier[m.tier] ??= []).push(m);
+    }
+
+    return successResponse("models", `${status.totalAvailable}/${status.totalCapacity} slots available`, {
+      totalCapacity: status.totalCapacity,
+      totalActive: status.totalActive,
+      totalAvailable: status.totalAvailable,
+      byTier,
+      models: modelDetails,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return errorResponse("models", `Failed to query model pool: ${message}. Ensure maskweaver.config.json has dummyHumans.pool configured.`);
+  }
 }

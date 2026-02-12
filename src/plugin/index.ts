@@ -1104,21 +1104,84 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
   // Load from package assets first, then project .opencode (project overrides package)
   const loadedAgents = loadAgentAssets(assetsDir, projectOpencodeDir);
 
-  // Add variants for dummy-human
-  if (loadedAgents['dummy-human']) {
-    if (!loadedAgents['dummy-flash']) {
-      loadedAgents['dummy-flash'] = {
-        ...loadedAgents['dummy-human'],
-        description: 'Dummy-Human (Flash) - Fast and cheap',
-        model: 'google/gemini-2.0-flash',
-      };
-    }
-    if (!loadedAgents['dummy-premium']) {
-      loadedAgents['dummy-premium'] = {
-        ...loadedAgents['dummy-human'],
-        description: 'Dummy-Human (Premium) - Powerful and reasoning',
-        model: 'google/gemini-2.0-pro-exp-02-05',
-      };
+  // ==========================================================================
+  // 8b. Generate agents from model pool (or legacy fallback)
+  // ==========================================================================
+  {
+    const { loadRuntimeConfig, normalizeDummyHumansConfig } = await import('../shared/config.js');
+    const { createModelRegistry } = await import('../shared/model-registry.js');
+    const runtimeConfig = loadRuntimeConfig(directory);
+
+    if (runtimeConfig.dummyHumans) {
+      const pool = normalizeDummyHumansConfig(runtimeConfig.dummyHumans);
+      // Initialize the global model registry
+      createModelRegistry(pool);
+
+      if (loadedAgents['dummy-human']) {
+        // Generate agent variants from pool entries
+        for (const entry of pool) {
+          const agentName = `dummy-${entry.id}`;
+          if (!loadedAgents[agentName]) {
+            const tierLabel = entry.tier === 'flash' ? 'Flash' : entry.tier === 'premium' ? 'Premium' : 'Standard';
+            const capStr = entry.capabilities.slice(0, 3).join(', ');
+            loadedAgents[agentName] = {
+              ...loadedAgents['dummy-human'],
+              description: `Dummy-Human (${entry.id}) - ${tierLabel}. ${entry.description || capStr}. [max ${entry.maxConcurrent} concurrent]`,
+              model: entry.model,
+            };
+          }
+        }
+
+        // Also ensure legacy dummy-flash / dummy-premium aliases exist (for backward compat)
+        const flashEntry = pool.find(e => e.tier === 'flash');
+        const humanEntry = pool.find(e => e.tier === 'human');
+        const premiumEntry = pool.find(e => e.tier === 'premium');
+
+        if (flashEntry && !loadedAgents['dummy-flash']) {
+          loadedAgents['dummy-flash'] = loadedAgents[`dummy-${flashEntry.id}`];
+        }
+        if (humanEntry) {
+           // dummy-human already exists as the base agent; just update its model from pool
+           loadedAgents['dummy-human'].model = humanEntry.model;
+         }
+        if (premiumEntry && !loadedAgents['dummy-premium']) {
+          loadedAgents['dummy-premium'] = loadedAgents[`dummy-${premiumEntry.id}`];
+        }
+
+        // Fallback: if no tier mapping found, use defaults
+        if (!loadedAgents['dummy-flash']) {
+          loadedAgents['dummy-flash'] = {
+            ...loadedAgents['dummy-human'],
+            description: 'Dummy-Human (Flash) - Fast and cheap',
+            model: 'google/gemini-2.0-flash',
+          };
+        }
+        if (!loadedAgents['dummy-premium']) {
+          loadedAgents['dummy-premium'] = {
+            ...loadedAgents['dummy-human'],
+            description: 'Dummy-Human (Premium) - Powerful and reasoning',
+            model: 'google/gemini-2.0-pro-exp-02-05',
+          };
+        }
+      }
+    } else {
+      // No pool config → legacy hardcoded defaults
+      if (loadedAgents['dummy-human']) {
+        if (!loadedAgents['dummy-flash']) {
+          loadedAgents['dummy-flash'] = {
+            ...loadedAgents['dummy-human'],
+            description: 'Dummy-Human (Flash) - Fast and cheap',
+            model: 'google/gemini-2.0-flash',
+          };
+        }
+        if (!loadedAgents['dummy-premium']) {
+          loadedAgents['dummy-premium'] = {
+            ...loadedAgents['dummy-human'],
+            description: 'Dummy-Human (Premium) - Powerful and reasoning',
+            model: 'google/gemini-2.0-pro-exp-02-05',
+          };
+        }
+      }
     }
   }
 

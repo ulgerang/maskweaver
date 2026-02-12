@@ -19,134 +19,188 @@ Project configuration takes precedence over user configuration.
 
 ### Minimal Configuration
 
-```typescript
-// maskweaver.config.ts
-export default {
-  // Dummy-human models (optional)
-  dummyHumans: {
-    flash: 'anthropic/claude-haiku-4',
-    human: 'anthropic/claude-sonnet-4',
-    premium: 'anthropic/claude-opus-4'
+```json
+// maskweaver.config.json
+{
+  "dummyHumans": {
+    "pool": [
+      { "id": "flash", "model": "google/gemini-2.0-flash", "tier": "flash", "maxConcurrent": 5, "capabilities": ["search", "simple-coding"], "costTier": "low" },
+      { "id": "opus",  "model": "anthropic/claude-opus-4", "tier": "premium", "maxConcurrent": 1, "capabilities": ["reasoning", "complex-coding"], "costTier": "high" }
+    ]
   },
-  
-  // Memory provider (optional)
-  memory: {
-    provider: 'voyageai',
-    model: 'voyage-code-2',
-    dimensions: 1536
+  "memory": {
+    "provider": "ollama",
+    "model": "bge-m3",
+    "dimensions": 1024
   }
-};
+}
 ```
 
 ### Full Configuration Example
 
-```typescript
-// maskweaver.config.ts
-export default {
-  // Model configuration for dummy-humans
-  dummyHumans: {
-    flash: 'anthropic/claude-haiku-4',      // Fast, cheap tasks
-    human: 'anthropic/claude-sonnet-4',     // Balanced
-    premium: 'anthropic/claude-opus-4'      // Complex tasks
+```json
+// maskweaver.config.json
+{
+  // Model pool - each entry becomes a dummy-{id} agent
+  "dummyHumans": {
+    "pool": [
+      { "id": "gemini-flash", "model": "google/gemini-2.0-flash", "tier": "flash", "maxConcurrent": 5, "capabilities": ["search", "formatting", "simple-coding", "file-ops"], "costTier": "low", "description": "Fast, simple tasks" },
+      { "id": "claude-sonnet", "model": "anthropic/claude-sonnet-4", "tier": "human", "maxConcurrent": 3, "capabilities": ["coding", "testing", "refactoring"], "costTier": "medium", "description": "Balanced coding" },
+      { "id": "claude-opus", "model": "anthropic/claude-opus-4", "tier": "premium", "maxConcurrent": 1, "capabilities": ["architecture", "debugging", "reasoning", "complex-coding"], "costTier": "high", "description": "Complex reasoning" }
+    ]
   },
-  
+
   // Memory and embedding configuration
-  memory: {
-    provider: 'voyageai',  // ollama | openai | voyageai | openrouter | text
-    model: 'voyage-code-2',
-    dimensions: 1536,
-    
-    // Optional: Provider-specific settings
-    options: {
-      baseURL: 'https://api.voyageai.com/v1',
-      timeout: 30000
-    }
+  "memory": {
+    "provider": "voyageai",
+    "model": "voyage-code-2",
+    "dimensions": 1536
   },
-  
-  // Mask directory configuration
-  maskDir: './masks',
-  
+
   // Language preference
-  language: 'en',  // en | ko | zh | ja
-  
-  // Context system configuration
-  context: {
-    dataDir: './.opencode/context',
-    maxFeatures: 10
-  },
-  
-  // Retrospect configuration
-  retrospect: {
-    enabled: true,
-    autoTrigger: true,  // Auto-trigger on session end
-    depth: 'standard'   // quick | standard | deep
-  },
-  
+  "language": "en",
+
   // Verification configuration
-  verify: {
-    defaultMask: 'linus-torvalds',
-    autoVerify: false
+  "verify": {
+    "defaultMask": "linus-torvalds",
+    "autoVerify": false
   }
-};
+}
 ```
 
 ---
 
-## Dummy-Human Models
+## Model Pool (Dummy-Human Agents)
 
-Configure AI models for different task tiers:
+Maskweaver creates AI agents from configured models. Each model becomes a `dummy-{id}` agent that the Mask Weaver can delegate tasks to via the Task tool.
 
-### Tier Selection
+### Pool Configuration (Recommended)
 
-```typescript
-dummyHumans: {
-  // Flash: Fast, cheap operations
-  flash: 'anthropic/claude-haiku-4',
-  // - File searches
-  // - Simple summaries
-  // - Quick formatting
-  
-  // Human: Balanced performance
-  human: 'anthropic/claude-sonnet-4',
-  // - Code writing
-  // - Code reviews
-  // - General tasks
-  
-  // Premium: Maximum capability
-  premium: 'anthropic/claude-opus-4'
-  // - Architecture design
-  // - Complex debugging
-  // - Critical decisions
+In `maskweaver.config.json`:
+
+```json
+{
+  "dummyHumans": {
+    "pool": [
+      {
+        "id": "gemini-flash",
+        "model": "google/gemini-2.0-flash",
+        "tier": "flash",
+        "maxConcurrent": 5,
+        "capabilities": ["search", "formatting", "simple-coding", "file-ops"],
+        "costTier": "low",
+        "description": "Fast and cheap. Simple tasks, file ops, search."
+      },
+      {
+        "id": "claude-sonnet",
+        "model": "anthropic/claude-sonnet-4",
+        "tier": "human",
+        "maxConcurrent": 3,
+        "capabilities": ["coding", "testing", "refactoring"],
+        "costTier": "medium",
+        "description": "Balanced. General coding, tests, reviews."
+      },
+      {
+        "id": "claude-opus",
+        "model": "anthropic/claude-opus-4",
+        "tier": "premium",
+        "maxConcurrent": 1,
+        "capabilities": ["architecture", "debugging", "reasoning", "complex-coding"],
+        "costTier": "high",
+        "description": "Most powerful. Architecture, complex debugging."
+      }
+    ]
+  }
 }
 ```
 
-### Provider Options
+This generates the following agents at startup:
 
-Maskweaver supports multiple model providers through OpenRouter:
+| Agent Name | Model | Tier |
+|------------|-------|------|
+| `dummy-gemini-flash` | google/gemini-2.0-flash | flash |
+| `dummy-claude-sonnet` | anthropic/claude-sonnet-4 | human |
+| `dummy-claude-opus` | anthropic/claude-opus-4 | premium |
+| `dummy-flash` | (alias for first flash entry) | flash |
+| `dummy-human` | (updated with first human entry) | human |
+| `dummy-premium` | (alias for first premium entry) | premium |
 
-```typescript
-dummyHumans: {
-  // Anthropic
-  flash: 'anthropic/claude-haiku-4',
-  human: 'anthropic/claude-sonnet-4',
-  premium: 'anthropic/claude-opus-4',
-  
-  // OpenAI
-  // flash: 'openai/gpt-4o-mini',
-  // human: 'openai/gpt-4o',
-  // premium: 'openai/o1',
-  
-  // Google
-  // flash: 'google/gemini-flash-2.0',
-  // human: 'google/gemini-pro-2.0',
-  // premium: 'google/gemini-pro-2.5',
-  
-  // Mix and match!
-  // flash: 'anthropic/claude-haiku-4',
-  // human: 'google/gemini-pro-2.0',
-  // premium: 'openai/o1'
+### Pool Entry Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | Yes | Unique name. Becomes the agent name: `dummy-{id}` |
+| `model` | Yes | Full model identifier (e.g., `google/gemini-2.0-flash`) |
+| `tier` | Yes | `flash`, `human`, or `premium` |
+| `maxConcurrent` | Yes | Max parallel uses (API/subscription limit) |
+| `capabilities` | Yes | Task tags this model excels at |
+| `costTier` | Yes | `low`, `medium`, or `high` |
+| `description` | No | Human-readable summary |
+
+### Adding Multiple Models per Tier
+
+You can add as many models as you want. Each gets its own agent:
+
+```json
+{
+  "dummyHumans": {
+    "pool": [
+      { "id": "gemini-flash",  "model": "google/gemini-2.0-flash",    "tier": "flash",   "maxConcurrent": 5, "capabilities": ["search", "formatting"], "costTier": "low" },
+      { "id": "gemini-pro",    "model": "google/gemini-2.5-pro",      "tier": "flash",   "maxConcurrent": 3, "capabilities": ["coding", "search"],    "costTier": "low" },
+      { "id": "claude-sonnet", "model": "anthropic/claude-sonnet-4",  "tier": "human",   "maxConcurrent": 3, "capabilities": ["coding", "testing"],    "costTier": "medium" },
+      { "id": "gpt-4o",        "model": "openai/gpt-4o",             "tier": "human",   "maxConcurrent": 3, "capabilities": ["coding", "frontend"],   "costTier": "medium" },
+      { "id": "claude-opus",   "model": "anthropic/claude-opus-4",   "tier": "premium", "maxConcurrent": 1, "capabilities": ["architecture", "reasoning"], "costTier": "high" },
+      { "id": "o3",            "model": "openai/o3",                 "tier": "premium", "maxConcurrent": 1, "capabilities": ["reasoning", "debugging"],    "costTier": "high" }
+    ]
+  }
 }
 ```
+
+Generated agents: `dummy-gemini-flash`, `dummy-gemini-pro`, `dummy-claude-sonnet`, `dummy-gpt-4o`, `dummy-claude-opus`, `dummy-o3`
+
+All callable via `Task(dummy-gemini-pro)`, `Task(dummy-o3)`, etc.
+
+### Tier and Weave Integration
+
+When `weave craft` runs, tasks are automatically assigned an agent tier based on complexity:
+
+| Complexity | Agent Tier | Example Tasks |
+|-----------|------------|---------------|
+| simple | `dummy-flash` | File renames, import fixes, config changes |
+| standard | `dummy-human` | Component implementation, API endpoints, tests |
+| complex | `dummy-premium` | Architecture refactoring, auth, state management |
+
+The legacy aliases (`dummy-flash`, `dummy-human`, `dummy-premium`) always point to the first pool entry of each tier.
+
+### Capabilities
+
+Capabilities are tags used for smart model selection. Built-in tags:
+
+| Category | Tags |
+|----------|------|
+| Simple | `search`, `formatting`, `simple-coding`, `file-ops` |
+| Standard | `coding`, `testing`, `refactoring` |
+| Complex | `architecture`, `debugging`, `reasoning`, `complex-coding` |
+| Domain | `frontend`, `backend`, `database`, `devops`, `ml` |
+
+You can also use custom tags (any string).
+
+### Legacy Format (Backward Compatible)
+
+The simple 3-model format still works:
+
+```json
+{
+  "dummyHumans": {
+    "flash": "google/gemini-2.0-flash",
+    "human": "anthropic/claude-sonnet-4",
+    "premium": "anthropic/claude-opus-4"
+  }
+}
+```
+
+This is automatically converted to pool entries with default capabilities.
+If no configuration exists, hardcoded defaults are used (gemini-flash + gemini-pro).
 
 ---
 
@@ -694,75 +748,46 @@ Configuration is loaded in this order (highest to lowest priority):
 
 ### For Solo Developer
 
-```typescript
-export default {
-  dummyHumans: {
-    flash: 'anthropic/claude-haiku-4',
-    human: 'anthropic/claude-sonnet-4',
-    premium: 'anthropic/claude-sonnet-4'  // Save costs
+```json
+{
+  "dummyHumans": {
+    "flash": "google/gemini-2.0-flash",
+    "human": "anthropic/claude-sonnet-4",
+    "premium": "anthropic/claude-sonnet-4"
   },
-  
-  memory: {
-    provider: 'ollama',  // Free and local
-    model: 'bge-m3',
-    dimensions: 1024
-  },
-  
-  language: 'en'
-};
+  "memory": { "provider": "ollama", "model": "bge-m3", "dimensions": 1024 },
+  "language": "en"
+}
 ```
 
-### For Team
+### For Power User (Multiple Models)
 
-```typescript
-export default {
-  dummyHumans: {
-    flash: 'anthropic/claude-haiku-4',
-    human: 'anthropic/claude-sonnet-4',
-    premium: 'anthropic/claude-opus-4'
+```json
+{
+  "dummyHumans": {
+    "pool": [
+      { "id": "gemini-flash", "model": "google/gemini-2.0-flash", "tier": "flash", "maxConcurrent": 5, "capabilities": ["search", "formatting", "simple-coding"], "costTier": "low" },
+      { "id": "gemini-pro",   "model": "google/gemini-2.5-pro",   "tier": "human", "maxConcurrent": 3, "capabilities": ["coding", "testing"],  "costTier": "medium" },
+      { "id": "claude-sonnet","model": "anthropic/claude-sonnet-4","tier": "human", "maxConcurrent": 3, "capabilities": ["coding", "frontend"], "costTier": "medium" },
+      { "id": "claude-opus",  "model": "anthropic/claude-opus-4",  "tier": "premium", "maxConcurrent": 1, "capabilities": ["architecture", "reasoning", "complex-coding"], "costTier": "high" }
+    ]
   },
-  
-  memory: {
-    provider: 'voyageai',  // Best quality
-    model: 'voyage-code-2',
-    dimensions: 1536
-  },
-  
-  context: {
-    autoInclude: true,
-    maxFeatures: 20
-  },
-  
-  retrospect: {
-    enabled: true,
-    autoTrigger: true,
-    depth: 'deep'  // Learn from sessions
-  },
-  
-  language: 'en'
-};
+  "memory": { "provider": "voyageai", "model": "voyage-code-2", "dimensions": 1536 },
+  "language": "en"
+}
 ```
 
 ### For Cost Optimization
 
-```typescript
-export default {
-  dummyHumans: {
-    flash: 'anthropic/claude-haiku-4',
-    human: 'anthropic/claude-sonnet-4',
-    premium: 'anthropic/claude-sonnet-4'  // Skip Opus
+```json
+{
+  "dummyHumans": {
+    "flash": "google/gemini-2.0-flash",
+    "human": "google/gemini-2.0-flash",
+    "premium": "anthropic/claude-sonnet-4"
   },
-  
-  memory: {
-    provider: 'ollama',  // Free
-    model: 'bge-m3',
-    dimensions: 1024
-  },
-  
-  retrospect: {
-    depth: 'quick'  // Faster, cheaper
-  }
-};
+  "memory": { "provider": "ollama", "model": "bge-m3", "dimensions": 1024 }
+}
 ```
 
 ---
@@ -771,7 +796,7 @@ export default {
 
 ### "Configuration not found"
 
-**Solution:** Create `maskweaver.config.ts` in your project root or `~/.config/opencode/`.
+**Solution:** Create `maskweaver.config.json` in your project root.
 
 ### "Invalid memory provider"
 
@@ -788,9 +813,8 @@ export VOYAGEAI_API_KEY=...
 ### Configuration not loading
 
 **Solution:**
-1. Check file location
-2. Verify syntax (valid TypeScript)
-3. Run: `bun run validate-config`
+1. Check file location (`maskweaver.config.json` in project root)
+2. Verify syntax (valid JSON)
 
 ---
 

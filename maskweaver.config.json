@@ -11,6 +11,24 @@
         "description": "Fast and cheap. Simple tasks, file ops, search."
       },
       {
+        "id": "kimi-k2",
+        "model": "kimi-for-coding/k2p5",
+        "tier": "human",
+        "maxConcurrent": 3,
+        "capabilities": ["coding", "testing", "refactoring", "frontend", "backend"],
+        "costTier": "medium",
+        "description": "Kimi K2.5. Balanced coding, testing, general tasks."
+      },
+      {
+        "id": "glm-5",
+        "model": "zai-coding-plan/glm-5",
+        "tier": "human",
+        "maxConcurrent": 3,
+        "capabilities": ["coding", "testing", "refactoring", "frontend", "backend"],
+        "costTier": "medium",
+        "description": "GLM-5. Balanced coding, testing, general tasks."
+      },
+      {
         "id": "claude-opus",
         "model": "google/antigravity-claude-opus-4-5-thinking",
         "tier": "premium",

@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "maskweaver": "./dist/cli/install.js"
+    "maskweaver": "dist/cli/install.js"
   },
   "files": [
     "dist",
@@ -99,7 +99,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ulgerang/maskweaver.git"
+    "url": "git+https://github.com/ulgerang/maskweaver.git"
   },
   "homepage": "https://github.com/ulgerang/maskweaver#readme",
   "bugs": {

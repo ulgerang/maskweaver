@@ -15,6 +15,7 @@ import { WeaveOrchestrator, getOrchestrator } from '../orchestrator.js';
 import { PhaseManager, getPhaseManager } from '../phase-manager.js';
 import { searchTroubleshooting, recordTroubleshooting } from '../knowledge/global.js';
 import { analyzeParallelOpportunities, formatParallelAnalysis } from '../bridge.js';
+import { spawn } from 'node:child_process';
 import {
     checkPlaywrightSetup,
     runPlaywrightTests,
@@ -22,6 +23,8 @@ import {
     type PlaywrightTestResult,
     type PlaywrightConfig,
 } from '../verification/index.js';
+
+import { recommendVerificationCommands } from '../verification/commands.js';
 
 // ============================================================================
 // Types
@@ -32,6 +35,8 @@ export interface ExecuteOptions {
     onEvent?: (event: WeaveEvent) => void;
     projectType?: string;
     techStack?: string[];
+    /** Base path for .opencode/weave (defaults to process.cwd()) */
+    basePath?: string;
 }
 
 export interface PrepareResult {
@@ -77,9 +82,9 @@ export interface TaskExecutionContext {
  * (dummy-flash, dummy-human, dummy-premium) — not by this function.
  */
 export async function preparePhaseExecution(options: ExecuteOptions): Promise<PrepareResult> {
-    const { phaseId, onEvent = () => { }, projectType } = options;
+    const { phaseId, onEvent = () => { }, projectType, basePath } = options;
 
-    const manager = getPhaseManager();
+    const manager = getPhaseManager(basePath);
     const orchestrator = getOrchestrator();
 
     // Load plan and get phase
@@ -129,14 +134,14 @@ export function formatExecutionPlan(plan: PhaseExecutionPlan): string {
     lines.push('');
     lines.push('### Execution Plan');
     lines.push('');
-    lines.push('| # | Task | Complexity | Agent Tier | Mask |');
-    lines.push('|---|------|-----------|------------|------|');
+    lines.push('| # | Task ID | Task | Complexity | Agent Tier | Mask |');
+    lines.push('|---|---------|------|-----------|------------|------|');
 
     for (let i = 0; i < plan.taskPlans.length; i++) {
         const tp = plan.taskPlans[i];
         const tierLabel = formatTierLabel(tp.agentTier);
         const mask = tp.mask || 'auto';
-        lines.push(`| ${i + 1} | ${tp.task.name} | ${tp.complexity} | ${tierLabel} | ${mask} |`);
+        lines.push(`| ${i + 1} | ${tp.task.id} | ${tp.task.name} | ${tp.complexity} | ${tierLabel} | ${mask} |`);
     }
 
     lines.push('');
@@ -178,7 +183,16 @@ export function formatExecutionPlan(plan: PhaseExecutionPlan): string {
     lines.push('### Instructions');
     lines.push('');
     lines.push('For each task above, delegate using `Task(<agent_tier>)` with the specified mask.');
-    lines.push('After all tasks pass, run `weave approve` to mark the phase complete.');
+    lines.push('Track task progress with `weave task` (recommended).');
+    lines.push('');
+    lines.push('**Suggested per-task loop:**');
+    lines.push(`1) Start: \`weave command=task phaseId="${plan.phaseId}" taskAction=start taskId="<TASK_ID>"\``);
+    lines.push('2) Delegate implementation to the selected agent tier + mask');
+    lines.push(`3) Pass + quick verify: \`weave command=task phaseId="${plan.phaseId}" taskAction=pass taskId="<TASK_ID>" verify=true verifyMode="quick"\``);
+    lines.push('4) (Optional) Atomic commit: add `commit=true` (and `stageAll=true` if you want auto staging)');
+    lines.push('');
+    lines.push('After all tasks pass, run `weave approve` to run full verification and mark the phase complete.');
+    lines.push(`If you must bypass verification: \`weave command=approve phaseId="${plan.phaseId}" skipVerify=true\``);
     lines.push('');
     lines.push('**Decision flow per task:**');
     lines.push('1. Simple (flash) -> Handle directly or delegate to dummy-flash');
@@ -211,7 +225,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
     // Use preparePhaseExecution internally
     const { plan: executionPlan, phase } = await preparePhaseExecution(options);
 
-    const manager = getPhaseManager();
+    const manager = getPhaseManager(options.basePath);
     const masksUsed: Set<string> = new Set();
 
     // Collect masks from the execution plan
@@ -271,6 +285,8 @@ export interface AIVerificationOptions {
     enableScreenshots?: boolean;
     enablePlaywright?: boolean;
     enableDevTools?: boolean;
+    /** Verification scope. quick: TypeCheck + UnitTests only. full: all available. */
+    mode?: 'quick' | 'full';
 }
 
 /**
@@ -294,10 +310,10 @@ export async function runAIVerification(options: AIVerificationOptions): Promise
         try {
             switch (layer.type) {
                 case 'build':
-                    result = await runBuildVerification(options);
+                    result = await runBuildVerification(options, layer.name);
                     break;
                 case 'test':
-                    result = await runTestVerification(options);
+                    result = await runTestVerification(options, layer.name);
                     break;
                 case 'visual':
                     result = await runVisualVerification(options);
@@ -334,14 +350,23 @@ export async function runAIVerification(options: AIVerificationOptions): Promise
 }
 
 function getVerificationLayers(options: AIVerificationOptions): VerificationLayer[] {
+    const rec = recommendVerificationCommands({
+        projectPath: options.projectPath,
+        projectTypeHint: options.projectType,
+    });
+
+    const hasTests = rec.testSteps.length > 0;
+    const mode = options.mode || 'full';
+    const full = mode === 'full';
+
     return [
         // Layer 1: Build/Compile
-        { name: 'TypeCheck', order: 1, type: 'build', enabled: true },
-        { name: 'Lint', order: 2, type: 'build', enabled: true },
-        { name: 'Build', order: 3, type: 'build', enabled: true },
+        { name: 'TypeCheck', order: 1, type: 'build', enabled: rec.buildSteps.some(s => s.name === 'TypeCheck') },
+        { name: 'Lint', order: 2, type: 'build', enabled: full && rec.buildSteps.some(s => s.name === 'Lint') },
+        { name: 'Build', order: 3, type: 'build', enabled: full && rec.buildSteps.some(s => s.name === 'Build') },
 
         // Layer 2: Unit/Integration Tests
-        { name: 'UnitTests', order: 4, type: 'test', enabled: true },
+        { name: 'UnitTests', order: 4, type: 'test', enabled: hasTests },
 
         // Layer 3: E2E Tests (Playwright/Cypress)
         { name: 'E2ETests', order: 5, type: 'test', enabled: options.enablePlaywright ?? false },
@@ -361,67 +386,247 @@ function getVerificationLayers(options: AIVerificationOptions): VerificationLaye
 // Build Verification (tsc, lint, build)
 // ============================================================================
 
-async function runBuildVerification(options: AIVerificationOptions): Promise<VerificationResult> {
-    const { projectType, projectPath } = options;
+interface ShellCommandResult {
+    cmd: string;
+    cwd: string;
+    exitCode: number;
+    timedOut: boolean;
+    timeoutMs: number;
+    stdout: string;
+    stderr: string;
+    durationMs: number;
+}
 
-    const commands: Record<string, { name: string; cmd: string }[]> = {
-        typescript: [
-            { name: 'TypeCheck', cmd: 'npx tsc --noEmit' },
-            { name: 'Lint', cmd: 'npm run lint' },
-            { name: 'Build', cmd: 'npm run build' },
-        ],
-        javascript: [
-            { name: 'Lint', cmd: 'npm run lint' },
-            { name: 'Build', cmd: 'npm run build' },
-        ],
-        nextjs: [
-            { name: 'TypeCheck', cmd: 'npx tsc --noEmit' },
-            { name: 'Lint', cmd: 'npm run lint' },
-            { name: 'Build', cmd: 'npm run build' },
-        ],
-        python: [
-            { name: 'Lint', cmd: 'ruff check .' },
-            { name: 'TypeCheck', cmd: 'mypy .' },
-        ],
-        go: [
-            { name: 'Build', cmd: 'go build ./...' },
-            { name: 'Vet', cmd: 'go vet ./...' },
-        ],
-    };
+async function runShellCommand(
+    cmd: string,
+    cwd: string,
+    options?: {
+        timeoutMs?: number;
+        maxOutputChars?: number;
+    }
+): Promise<ShellCommandResult> {
+    const timeoutMs = options?.timeoutMs ?? 10 * 60 * 1000;
+    const maxOutputChars = options?.maxOutputChars ?? 50_000;
+    const start = Date.now();
 
-    const cmds = commands[projectType] || commands.typescript;
+    return new Promise((resolve) => {
+        const proc = spawn(cmd, {
+            cwd,
+            shell: true,
+            windowsHide: true,
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        let stdout = '';
+        let stderr = '';
+        let timedOut = false;
+
+        const appendTail = (current: string, chunk: string): string => {
+            const next = current + chunk;
+            if (next.length <= maxOutputChars) return next;
+            return next.slice(next.length - maxOutputChars);
+        };
+
+        proc.stdout?.on('data', (data) => {
+            stdout = appendTail(stdout, data.toString());
+        });
+
+        proc.stderr?.on('data', (data) => {
+            stderr = appendTail(stderr, data.toString());
+        });
+
+        const timer = setTimeout(() => {
+            timedOut = true;
+            try {
+                proc.kill();
+            } catch {
+                // ignore
+            }
+        }, timeoutMs);
+
+        const finalize = (exitCode: number) => {
+            clearTimeout(timer);
+            resolve({
+                cmd,
+                cwd,
+                exitCode,
+                timedOut,
+                timeoutMs,
+                stdout: stdout.trim(),
+                stderr: stderr.trim(),
+                durationMs: Date.now() - start,
+            });
+        };
+
+        proc.on('close', (code) => {
+            finalize(code ?? 1);
+        });
+
+        proc.on('error', (error) => {
+            stderr = appendTail(stderr, error.message);
+            finalize(1);
+        });
+    });
+}
+
+async function runBuildVerification(options: AIVerificationOptions, stepName: string): Promise<VerificationResult> {
+    const rec = recommendVerificationCommands({
+        projectPath: options.projectPath,
+        projectTypeHint: options.projectType,
+    });
+
+    const step = rec.buildSteps.find(s => s.name === stepName);
     const logs: string[] = [];
 
-    for (const { name, cmd } of cmds) {
-        logs.push(`[${name}] Running: ${cmd}`);
+    if (!step) {
+        logs.push(`[${stepName}] Skipped (no command detected)`);
+        logs.push(`[detect] type=${rec.detectedType} evidence=${rec.evidence.join(', ') || '(none)'}`);
+        return { passed: true, logs, layer: 'Build', duration: 0 };
     }
 
-    return { passed: true, logs, layer: 'Build', duration: 0 };
+    logs.push(`[${stepName}] Running: ${step.cmd}`);
+    logs.push(`[detect] type=${rec.detectedType} evidence=${rec.evidence.join(', ') || '(none)'}`);
+    if (step.reason) logs.push(`[${stepName}] Reason: ${step.reason}`);
+    for (const n of rec.notes.slice(0, 3)) logs.push(`[note] ${n}`);
+
+    const result = await runShellCommand(step.cmd, options.projectPath);
+
+    if (result.stdout) {
+        logs.push(`[${stepName}] stdout (tail):`);
+        for (const line of result.stdout.split(/\r?\n/).slice(-20)) {
+            if (line.trim().length > 0) logs.push(`> ${line}`);
+        }
+    }
+
+    if (result.stderr) {
+        logs.push(`[${stepName}] stderr (tail):`);
+        for (const line of result.stderr.split(/\r?\n/).slice(-20)) {
+            if (line.trim().length > 0) logs.push(`> ${line}`);
+        }
+    }
+
+    if (result.timedOut || result.exitCode !== 0) {
+        const why = result.timedOut
+            ? `timed out (>${Math.round(result.timeoutMs / 1000)}s)`
+            : `exit code ${result.exitCode}`;
+        const combined = `${result.stdout}\n${result.stderr}`.trim();
+
+        // Try to find similar troubleshooting entries
+        if (combined.length > 0) {
+            try {
+                const solutions = await searchTroubleshooting(combined, {
+                    projectType: options.projectType,
+                    limit: 3,
+                });
+                if (solutions.length > 0) {
+                    logs.push(`[${stepName}] Hints (Global Knowledge):`);
+                    for (const s of solutions) {
+                        logs.push(`- ${s.entry.solution}`);
+                    }
+                }
+            } catch {
+                // ignore knowledge search failures
+            }
+        }
+
+        return {
+            passed: false,
+            error: `Command failed: ${step.cmd} (${why})`,
+            logs,
+            layer: 'Build',
+            duration: result.durationMs,
+        };
+    }
+
+    return { passed: true, logs, layer: 'Build', duration: result.durationMs };
 }
 
 // ============================================================================
 // Test Verification (unit, E2E)
 // ============================================================================
 
-async function runTestVerification(options: AIVerificationOptions): Promise<VerificationResult> {
-    const { projectType, projectPath, enablePlaywright, devServerUrl } = options;
+async function runTestVerification(options: AIVerificationOptions, stepName: string): Promise<VerificationResult> {
+    const { projectPath, enablePlaywright, devServerUrl } = options;
     const logs: string[] = [];
     let playwrightResult: PlaywrightTestResult | null = null;
 
-    // Unit tests
-    const unitTestCmds: Record<string, string> = {
-        typescript: 'npm test',
-        javascript: 'npm test',
-        nextjs: 'npm test',
-        python: 'pytest',
-        go: 'go test ./...',
-    };
+    // Unit tests (recommended)
+    if (stepName === 'UnitTests') {
+        const rec = recommendVerificationCommands({
+            projectPath: options.projectPath,
+            projectTypeHint: options.projectType,
+        });
+        const unit = rec.testSteps.find(s => s.name === 'UnitTests');
 
-    const unitCmd = unitTestCmds[projectType] || 'npm test';
-    logs.push(`[UnitTests] Running: ${unitCmd}`);
+        if (!unit) {
+            logs.push('[UnitTests] Skipped (no command detected)');
+            logs.push(`[detect] type=${rec.detectedType} evidence=${rec.evidence.join(', ') || '(none)'}`);
+            return { passed: true, logs, layer: 'Test', duration: 0 };
+        }
 
-    // E2E tests with Playwright (if enabled)
-    if (enablePlaywright) {
+        logs.push(`[UnitTests] Running: ${unit.cmd}`);
+        logs.push(`[detect] type=${rec.detectedType} evidence=${rec.evidence.join(', ') || '(none)'}`);
+        if (unit.reason) logs.push(`[UnitTests] Reason: ${unit.reason}`);
+        for (const n of rec.notes.slice(0, 3)) logs.push(`[note] ${n}`);
+
+        const result = await runShellCommand(unit.cmd, options.projectPath);
+
+        if (result.stdout) {
+            logs.push('[UnitTests] stdout (tail):');
+            for (const line of result.stdout.split(/\r?\n/).slice(-20)) {
+                if (line.trim().length > 0) logs.push(`> ${line}`);
+            }
+        }
+
+        if (result.stderr) {
+            logs.push('[UnitTests] stderr (tail):');
+            for (const line of result.stderr.split(/\r?\n/).slice(-20)) {
+                if (line.trim().length > 0) logs.push(`> ${line}`);
+            }
+        }
+
+        if (result.timedOut || result.exitCode !== 0) {
+            const why = result.timedOut
+                ? `timed out (>${Math.round(result.timeoutMs / 1000)}s)`
+                : `exit code ${result.exitCode}`;
+            const combined = `${result.stdout}\n${result.stderr}`.trim();
+
+            if (combined.length > 0) {
+                try {
+                    const solutions = await searchTroubleshooting(combined, {
+                        projectType: options.projectType,
+                        limit: 3,
+                    });
+                    if (solutions.length > 0) {
+                        logs.push('[UnitTests] Hints (Global Knowledge):');
+                        for (const s of solutions) {
+                            logs.push(`- ${s.entry.solution}`);
+                        }
+                    }
+                } catch {
+                    // ignore
+                }
+            }
+
+            return {
+                passed: false,
+                error: `Command failed: ${unit.cmd} (${why})`,
+                logs,
+                layer: 'Test',
+                duration: result.durationMs,
+            };
+        }
+
+        return { passed: true, logs, layer: 'Test', duration: result.durationMs };
+    }
+
+    // E2E tests with Playwright
+    if (stepName === 'E2ETests') {
+        if (!enablePlaywright) {
+            logs.push('[E2E] Skipped (enablePlaywright=false)');
+            return { passed: true, logs, layer: 'E2E', duration: 0 };
+        }
+
         logs.push('[E2E] Checking Playwright setup...');
 
         const setupStatus = await checkPlaywrightSetup(projectPath);
@@ -490,9 +695,11 @@ async function runTestVerification(options: AIVerificationOptions): Promise<Veri
                 };
             }
         }
+        return { passed: true, logs, layer: 'E2E', duration: playwrightResult?.duration || 0 };
     }
 
-    return { passed: true, logs, layer: 'Test', duration: playwrightResult?.duration || 0 };
+    logs.push(`[${stepName}] Skipped (unknown test step)`);
+    return { passed: true, logs, layer: 'Test', duration: 0 };
 }
 
 // ============================================================================

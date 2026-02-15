@@ -195,7 +195,9 @@ export function createWorktreeManager(options: WorktreeManagerOptions): Worktree
           }
           currentWorktree = { path: line.substring('worktree '.length) };
         } else if (line.startsWith('branch ')) {
-          currentWorktree.branch = line.substring('branch '.length);
+          // git outputs full ref, e.g. "refs/heads/squad/task-123"
+          const ref = line.substring('branch '.length).trim();
+          currentWorktree.branch = ref.replace(/^refs\/heads\//, '');
         }
         // Other fields like HEAD, bare, etc., are ignored for WorktreeInfo
       }

@@ -26,8 +26,18 @@ export type {
     PotentialIssue,
 } from './types.js';
 
+// Worktree utilities (parallel development)
+export {
+    createWeaveWorktree,
+    listWeaveWorktrees,
+    resolveWeaveWorktree,
+    removeWeaveWorktree,
+    bootstrapWeaveArtifacts,
+} from './worktree.js';
+
 // Core workflow stages
 export { intake } from './stages/intake.js';
+export { spec } from './stages/spec.js';
 export { plan } from './stages/plan.js';
 export { execute } from './stages/execute.js';
 export { handoff } from './stages/handoff.js';
@@ -72,6 +82,27 @@ export {
     updatePhaseStatus,
     listPhases,
 } from './phase-manager.js';
+
+// Git + Security
+export {
+    execGit,
+    ensureGitRepo,
+    stageAllChanges,
+    listStagedFiles,
+    hasStagedChanges,
+    commitStagedChanges,
+} from './git.js';
+
+export {
+    scanFilesForSecrets,
+    loadSecretScanConfig,
+    shouldBlockOnFindings,
+    formatSecretScanReport,
+    type SecretFinding,
+    type SecretKind,
+    type SecretSeverity,
+    type SecretScanConfig,
+} from './security/secret-scan.js';
 
 // YAML Repair
 export {

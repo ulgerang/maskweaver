@@ -16,6 +16,10 @@ import { PhaseManager, getPhaseManager } from '../phase-manager.js';
 export interface PlanOptions {
     intake: IntakeResult;
     projectName: string;
+    /** Optional stable identifier used for plan filename/state.yaml */
+    planName?: string;
+    /** Base path for .opencode/weave (defaults to process.cwd()) */
+    basePath?: string;
     userAnswers?: Record<string, string>;  // Answers to intake questions
 }
 
@@ -141,7 +145,7 @@ function generatePhases(
 // ============================================================================
 
 export async function plan(options: PlanOptions): Promise<PlanResult> {
-    const { intake, projectName, userAnswers } = options;
+    const { intake, projectName, userAnswers, planName, basePath } = options;
 
     // Infer architecture
     const architecture = inferArchitecture(intake, userAnswers);
@@ -158,13 +162,23 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
     const estimatedTotalHours = phases.reduce((sum, p) => sum + (p.estimatedHours || 3), 0);
 
     // Create plan
-    const manager = getPhaseManager();
+    const normalizedPlanName = planName || toKebabCase(projectName) || 'weave-plan';
+    const manager = getPhaseManager(basePath);
     const weavePlan = await manager.createPlan({
+        planName: normalizedPlanName,
         projectName,
         vision,
         architecture,
         phases,
     });
+
+    // vNext: Generate a baseline executable task list per phase
+    for (const phase of weavePlan.phases) {
+        const tasks = generateDefaultPhaseTasks(phase);
+        if (tasks.length > 0) {
+            await manager.addTasks(phase.id, tasks);
+        }
+    }
 
     // Generate summary
     const summary = generatePlanSummary(weavePlan, estimatedTotalHours);
@@ -174,6 +188,42 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
         summary,
         estimatedTotalHours,
     };
+}
+
+function generateDefaultPhaseTasks(
+    phase: WeavePhase
+): Array<Omit<WeavePhase['tasks'][0], 'status' | 'retryCount'>> {
+    // Keep tasks small, specific, and runnable. Downstream craft can refine.
+    const baseId = phase.id;
+    const title = phase.name;
+
+    return [
+        {
+            id: `${baseId}-T1`,
+            name: `${title} 구현`,
+            testCase: phase.doneWhen,
+            maxRetries: 3,
+        },
+        {
+            id: `${baseId}-T2`,
+            name: `${title} 테스트 추가/수정`,
+            testCase: '관련 테스트가 통과한다',
+            maxRetries: 2,
+        },
+        {
+            id: `${baseId}-T3`,
+            name: `${title} 검증 (빌드/테스트)`,
+            testCase: '빌드/테스트가 통과한다',
+            maxRetries: 2,
+        },
+    ];
+}
+
+function toKebabCase(input: string): string {
+    return input
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
 }
 
 // ============================================================================

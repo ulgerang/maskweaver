@@ -18,6 +18,14 @@ description: 요구사항 정제 및 검증 기준 추출
 
 ---
 
+## 실행
+
+```txt
+weave command=spec docsPath="$ARGUMENTS"
+```
+
+---
+
 ## 사전 조건
 
 `/weave-init`이 실행되어 있어야 합니다.

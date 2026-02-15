@@ -34,3 +34,12 @@ export {
     type PlaywrightSetupStatus,
     type PlaywrightErrorAnalysis,
 } from './playwright.js';
+
+// Generic build/test command recommendations
+export {
+    recommendVerificationCommands,
+    formatRecommendedCommandsAsBash,
+    type VerificationCommandRecommendation,
+    type VerificationCommandStep,
+    type DetectedProjectType,
+} from './commands.js';

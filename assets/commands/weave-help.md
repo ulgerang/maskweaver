@@ -42,10 +42,17 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 | 명령어 | 설명 |
 |--------|------|
 | `/weave-init` | Weave 초기화 (프로젝트당 1회) |
+| `/weave-spec [docs]` | 요구사항 정제 + 검증 기준(AC) 추출 (선택) |
+| `/weave-prepare [docs]` | **spec + plan을 한 번에 생성** (vNext 기본 경로) |
 | `/weave-design [docs]` | 요구사항 분석 → Phase 계획 (새 플랜 생성) |
+| `/weave-plan [docs]` | `/weave-design` 별칭 (호환용) |
 | `/weave-craft [phase-id]` | 활성 플랜의 Phase 실행 (자동 검증) |
 | `/weave-status` | 전체 플랜 목록 + 진행 상황 |
 | `/weave-switch [plan]` | 활성 플랜 전환 / 아카이브 |
+| `/weave-worktree` | git worktree 기반 병렬 작업(기능/Phase) 관리 |
+| `/weave-task` | Task 상태 업데이트(옵션: 빠른 검증/커밋) |
+| `/weave-verify` | 빌드/테스트 검증 실행(프로젝트 유형 자동 감지) |
+| `/weave-approve [P#]` | Phase 승인(검증 후 완료 처리, 옵션: 커밋) |
 | `/weave-help` | 이 도움말 |
 
 ---
@@ -55,12 +62,12 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 ```
 /weave-init                    ← 프로젝트 초기화 (1회)
     ↓
-/weave-design docs/            ← 첫 번째 플랜 생성
+/weave-prepare docs/           ← (추천) spec+plan 한 번에 생성
     ↓
 /weave-craft P1                ← Phase 실행
 /weave-craft P2
     ↓
-/weave-design wiki/new-feat    ← 두 번째 플랜 추가
+/weave-design wiki/new-feat    ← 두 번째 플랜 추가 (또는 prepare)
     ↓
 /weave-switch first-plan       ← 첫 번째 플랜으로 돌아가기
     ↓
@@ -84,6 +91,9 @@ active ──→ paused ──→ active (switch로 전환)
 ```
 .opencode/weave/
 ├── state.yaml           ← 활성 플랜 추적
+├── specs/
+│   ├── emotion-diary.yaml    ← baseline spec 1
+│   └── todo-app.yaml         ← baseline spec 2
 └── plans/
     ├── emotion-diary.yaml   ← 플랜 1
     ├── todo-app.yaml        ← 플랜 2
@@ -123,8 +133,8 @@ Phase 실행 시 자동 검증:
 # 1. 초기화 (프로젝트당 1회)
 /weave-init
 
-# 2. 요구사항 문서로 계획 수립
-/weave-design wiki/
+# 2. (추천) spec + plan을 한 번에 생성
+/weave-prepare wiki/
 
 # 3. 피드백 → 승인
 "좋아, 진행해"

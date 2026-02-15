@@ -18,6 +18,8 @@ export interface HandoffOptions {
     screenshotPath?: string;
     testResults?: TestResults;
     onEvent?: (event: WeaveEvent) => void;
+    /** Base path for .opencode/weave (defaults to process.cwd()) */
+    basePath?: string;
 }
 
 export interface TestResults {
@@ -130,9 +132,9 @@ function generateHandoffMessage(
 // ============================================================================
 
 export async function handoff(options: HandoffOptions): Promise<HandoffResult> {
-    const { phaseId, devUrl, testResults, onEvent = () => { } } = options;
+    const { phaseId, devUrl, testResults, onEvent = () => { }, basePath } = options;
 
-    const manager = getPhaseManager();
+    const manager = getPhaseManager(basePath);
     await manager.loadPlan();
     const phase = manager.getPhase(phaseId);
 
@@ -179,9 +181,10 @@ export async function handoff(options: HandoffOptions): Promise<HandoffResult> {
 export async function handleUserResponse(
     phaseId: string,
     response: UserResponse,
-    feedback?: string
+    feedback?: string,
+    basePath?: string
 ): Promise<{ message: string; nextAction?: string }> {
-    const manager = getPhaseManager();
+    const manager = getPhaseManager(basePath);
     await manager.loadPlan();
 
     const phase = manager.getPhase(phaseId);
@@ -266,7 +269,8 @@ export async function generateStatusReport(basePath?: string): Promise<string> {
             const total = p.phases.length;
             const completed = p.phases.filter(ph => ph.status === 'completed').length;
             const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
-            const isActive = p.projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') === activePlanName;
+            const planId = p.planName || p.projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+            const isActive = planId === activePlanName;
             const marker = isActive ? ' ✨' : '';
             const status = progress === 100 ? '✅ 완료' : p.phases.some(ph => ph.status === 'in_progress') ? '🔄 진행중' : '⏳ 대기';
             lines.push(`| ${p.projectName}${marker} | ${progress}% | ${completed}/${total} | ${status} |`);

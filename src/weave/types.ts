@@ -69,6 +69,13 @@ export interface PhaseExecutionPlan {
 // ============================================================================
 
 export interface WeavePlan {
+    /**
+     * Stable, filesystem-safe identifier for the plan.
+     * Used for plan filename and state.yaml active_plan.
+     *
+     * Example: "emotion-diary"
+     */
+    planName?: string;
     projectName: string;
     createdAt: string;
     updatedAt: string;

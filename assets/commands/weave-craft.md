@@ -74,14 +74,17 @@ AI가 자동으로 검증 루프를 돌리고, 완료되면 유저에게 전달�
    │   ├─ 최소 구현 (Green)
    │   ├─ 정리 (Refactor)
    │   └─ AI 자동 검증 → PASS/FAIL
-   │       ├─ PASS → 다음 Task
-   │       └─ FAIL → 글로벌 지식 검색 → 수정 → 재검증
+   │       ├─ PASS → `weave task ... taskAction=pass`로 상태 업데이트 (옵션: quick verify/commit)
+   │       └─ FAIL → `weave task ... taskAction=fail`로 기록 → 글로벌 지식 검색 → 수정 → 재검증
    └─ 5회 초과 → 유저에게 도움 요청
    ↓
 4. UPDATE PLAN (Phase 상태 업데이트)
    ↓
 5. USER HANDOFF (검증 완료 → 유저 테스트)
 ```
+
+> 참고: Phase 완료 처리는 `weave approve`가 담당합니다.
+> 기본적으로 full verify를 수행하고, 통과해야 Phase를 completed로 바꿉니다.
 
 ---
 

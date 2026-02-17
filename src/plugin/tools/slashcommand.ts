@@ -100,6 +100,21 @@ Example: weave command=design docsPath="docs/"`,
 
 Example: weave command=craft phaseId="P1"`,
     },
+    'weave-flow': {
+        metadata: {
+            name: 'weave-flow',
+            description: '원커맨드 실행 (prepare -> craft -> task auto)',
+            usage: '/weave flow [docsPath]',
+            examples: ['/weave flow docs/', '/weave flow'],
+        },
+        content: `Use the weave tool with command=flow.
+
+With docs path:
+weave command=flow docsPath="docs/"
+
+Continue active plan:
+weave command=flow`,
+    },
     'weave-status': {
         metadata: {
             name: 'weave-status',
@@ -242,6 +257,7 @@ export function createSlashcommandTool() {
         description: `Execute a slash command. Available commands include:
 - /weave help - Weave workflow help
 - /weave design [docs] - Analyze requirements and create plan
+- /weave flow [docs] - One-command path (prepare -> craft -> task auto)
 - /weave craft [phaseId] - Execute a phase
 - /weave status - View progress
 - /weave repair - Scan and auto-repair corrupted plan YAML files
@@ -288,7 +304,7 @@ Use command="list" to see all available commands.`,
                 if (helpCmd) {
                     return helpCmd.content || 'Weave help content not available.';
                 }
-            } else if (['status', 'design', 'craft', 'help', 'repair'].includes(cmdName)) {
+            } else if (['status', 'design', 'flow', 'craft', 'help', 'repair'].includes(cmdName)) {
                 // Shorthand: "status" -> "weave-status"
                 const weaveCmd = commands.find(c => c.name === `weave-${cmdName}`);
                 if (weaveCmd) {

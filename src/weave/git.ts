@@ -56,6 +56,16 @@ export async function hasStagedChanges(cwd: string): Promise<boolean> {
     return stdout.trim().length > 0;
 }
 
+export async function getWorkingTreeStatus(cwd: string): Promise<string> {
+    const { stdout } = await execGit(cwd, ['status', '--porcelain']);
+    return stdout;
+}
+
+export async function hasWorkingTreeChanges(cwd: string): Promise<boolean> {
+    const stdout = await getWorkingTreeStatus(cwd);
+    return stdout.trim().length > 0;
+}
+
 export async function commitStagedChanges(cwd: string, message: string): Promise<GitCommandResult> {
     return execGit(cwd, ['commit', '-m', message]);
 }

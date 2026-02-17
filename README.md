@@ -84,16 +84,18 @@ Add to your OpenCode config - that's it!
 **Global** (`~/.config/opencode/opencode.json`):
 ```json
 {
-  "plugin": ["maskweaver/plugin"]
+  "plugin": ["maskweaver"]
 }
 ```
 
 **Or per-project** (`opencode.json` in project root):
 ```json
 {
-  "plugin": ["maskweaver/plugin"]
+  "plugin": ["maskweaver"]
 }
 ```
+
+> Note: OpenCode installs npm packages by name. Use `maskweaver` (not `maskweaver/plugin`).
 
 OpenCode automatically installs the plugin to `~/.cache/opencode/node_modules/` on startup.
 
@@ -188,26 +190,46 @@ Weave is Maskweaver's flagship workflow. It breaks work into testable phases, au
 
 | Command | Description |
 |---------|-------------|
-| `/weave design [docs]` | Analyze requirements → Generate phase plan |
-| `/weave craft [phase]` | Execute phase with auto-verification loop |
+| `/weave init` | Initialize Weave (once per repo) |
+| `/weave prepare [docs]` | (Manual path) Generate baseline spec + phase plan |
+| `/weave flow [docs]` | (Recommended) One-command path: prepare -> craft -> task auto |
+| `/weave spec [docs]` | Generate baseline spec only (optional) |
+| `/weave design [docs]` | Analyze requirements → Generate phase plan (`/weave plan` is an alias) |
+| `/weave craft [P#]` | Generate/run execution plan (auto-select next phase if omitted) |
+| `/weave task ...` | Drive task loop (start/fail/retry/pass/auto) + optional verify/commit |
+| `/weave-task-auto [P#|P#-T#]` | Minimal-args auto task loop (quick verify by default) |
+| `/weave verify` | Run build/test verification (auto-detect) |
+| `/weave approve [P#]` | Verify (default) + mark phase complete (auto phase if omitted) |
+| `/weave worktree ...` | Manage git worktrees for parallel work |
 | `/weave status` | View project progress and stats |
 | `/weave help` | Show documentation |
+
+> Tip: In OpenCode chat you can use `/weave ...` commands, and they map to the underlying `weave command=...` tool calls.
 
 #### Workflow
 
 ```
-1. DESIGN: Analyze docs → Plan Phases
+0. INIT (once): /weave init
        ↓
-2. CRAFT: For each Phase:
-   ├── Auto-select Mask 🎭
-   ├── Test First (Red)
-   ├── Implement (Green)
-   ├── Refactor
-   └── Self-Verify Loop ✅
-       ├── PASS → Next task
-       └── FAIL → Search Global Knowledge → Retry (max 5)
+1. ONE-COMMAND (recommended): /weave flow docs/
+   - runs: prepare -> craft -> task auto
        ↓
-3. HANDOFF: All tests pass → User validates feel & intent
+   (or manual path)
+       ↓
+2. PLAN (manual path): /weave prepare docs/
+   - or: /weave spec docs/ → /weave design docs/
+       ↓
+3. CRAFT: /weave craft
+    - Generates an execution plan (tasks + suggested masks/agent tiers)
+       ↓
+4. TASK LOOP: /weave task ... (or /weave-task-auto)
+    - PASS → optional quick verify + optional atomic commit
+    - FAIL → record error → search Global Knowledge → retry (max 5)
+       ↓
+5. APPROVE: /weave approve
+    - Runs verification (full by default) and marks the phase completed
+       ↓
+6. HANDOFF: You validate UX/intent and move to next phase
 ```
 
 #### Multi-Layer AI Verification
@@ -342,14 +364,33 @@ import { WeaveOrchestrator, GlobalKnowledge } from 'maskweaver/weave';
 
 ## 🧵 Weave Usage Guide
 
-### Step 1: Design Phase
-
-Start by analyzing your requirements:
+### Step 0: Initialize (Once)
 
 ```bash
+/weave init
+```
+
+### Step 1: Create a Plan (Flow Recommended)
+
+Fastest path (one command):
+
+```bash
+/weave flow docs/
+```
+
+This runs `prepare -> craft -> task auto` in one shot.
+
+Manual happy path (spec + plan in one command):
+
+```bash
+/weave prepare docs/
+```
+
+Or run spec and plan separately:
+
+```bash
+/weave spec docs/
 /weave design docs/
-# or
-/weave design wiki/requirements.md
 ```
 
 The AI will:
@@ -375,22 +416,44 @@ Build a modern emotion diary app with AI-powered insights
 Is this plan okay? Let me know if changes are needed.
 ```
 
-### Step 2: Approve & Execute
+### Step 2: Craft a Phase (Auto-select if omitted)
 
-After approval, start executing:
+Start with the first phase:
 
 ```bash
-/weave craft P1
+/weave craft
 ```
 
-The AI will:
-1. Select the best mask for each task (e.g., Kent Beck for tests)
-2. Write tests first (Red)
-3. Implement minimal code (Green)
-4. Refactor for quality
-5. Run multi-layer verification
-6. If fails: search Global Knowledge → retry up to 5 times
-7. Hand off to you for validation
+`/weave craft` returns an execution plan the Mask Weaver can delegate/execute. Use `/weave task` (or `/weave-task-auto`) to drive the task loop and keep the plan state updated.
+
+### Step 3: Drive the Task Loop
+
+```txt
+weave command=task phaseId="P1" taskAction=list
+weave command=task phaseId="P1" taskAction=next
+weave command=task phaseId="P1" taskAction=start taskId="P1-T1"
+weave command=task phaseId="P1" taskAction=pass taskId="P1-T1" verify=true verifyMode="quick"
+weave command=task phaseId="P1" taskAction=fail taskId="P1-T1" taskError="<error message>"
+```
+
+One-shot auto loop (less manual typing):
+
+```txt
+weave command=task phaseId="P1" taskAction=auto verify=true verifyMode="quick"
+```
+
+You can also continue everything with one command:
+
+```txt
+weave command=flow
+```
+
+### Step 4: Verify and Approve the Phase
+
+```txt
+weave command=verify
+weave command=approve
+```
 
 Progress output:
 ```markdown
@@ -411,7 +474,7 @@ Progress output:
   - Fix: Added useEffect dependency array
 ```
 
-### Step 3: Handoff & Validate
+### Step 5: Handoff & Validate
 
 When all verifications pass:
 
@@ -440,7 +503,7 @@ http://localhost:5173
 **[Approve]** **[Request Changes]** **[Later]**
 ```
 
-### Step 4: Check Status Anytime
+### Step 6: Check Status Anytime
 
 ```bash
 /weave status

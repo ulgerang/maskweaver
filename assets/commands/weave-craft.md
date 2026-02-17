@@ -10,7 +10,10 @@ description: Phase 실행 (Build + Self-Verify Loop with Mask auto-selection)
 AI가 자동으로 검증 루프를 돌리고, 완료되면 유저에게 전달합니다.
 
 **사용법**: `/weave-craft $ARGUMENTS`
-- `$ARGUMENTS` = Phase ID (예: `P1`, `P2`)
+- `$ARGUMENTS` = 선택적 Phase ID (예: `P1`, `P2`)
+- 비우면 다음 실행 가능한 Phase를 자동 선택합니다.
+
+> prepare부터 task auto까지 한 번에 실행하려면 `/weave-flow [docs]`를 사용하세요.
 
 **Maskweaver 통합**:
 - **Masks**: Task별 전문가 마스크 자동 선택

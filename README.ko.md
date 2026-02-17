@@ -65,16 +65,18 @@ OpenCode 설정에 추가하면 끝!
 **전역** (`~/.config/opencode/opencode.json`):
 ```json
 {
-  "plugin": ["maskweaver/plugin"]
+  "plugin": ["maskweaver"]
 }
 ```
 
 **또는 프로젝트별** (프로젝트 루트의 `opencode.json`):
 ```json
 {
-  "plugin": ["maskweaver/plugin"]
+  "plugin": ["maskweaver"]
 }
 ```
+
+> 참고: OpenCode는 npm 패키지를 이름으로 설치합니다. `maskweaver`를 사용하세요 (`maskweaver/plugin` 아님).
 
 OpenCode가 시작 시 자동으로 `~/.cache/opencode/node_modules/`에 플러그인을 설치합니다.
 
@@ -169,26 +171,46 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
 
 | 명령어 | 설명 |
 |--------|------|
-| `/weave design [docs]` | 요구사항 분석 → Phase 계획 생성 |
-| `/weave craft [phase]` | 자동 검증 루프로 Phase 실행 |
+| `/weave init` | Weave 초기화 (프로젝트당 1회) |
+| `/weave prepare [docs]` | (수동 경로) baseline spec + phase plan 한 번에 생성 |
+| `/weave flow [docs]` | (권장) 원커맨드 경로: prepare -> craft -> task auto |
+| `/weave spec [docs]` | baseline spec만 생성 (선택) |
+| `/weave design [docs]` | 요구사항 분석 → Phase 계획 생성 (`/weave plan`은 별칭/호환) |
+| `/weave craft [P#]` | Phase 실행 계획 생성/실행 (phase 생략 시 자동 선택) |
+| `/weave task ...` | Task 루프 (start/fail/retry/pass/auto) + 옵션 검증/커밋 |
+| `/weave-task-auto [P#|P#-T#]` | 인자 최소화 자동 루프 (기본 quick verify) |
+| `/weave verify` | 빌드/테스트 검증 실행 (자동 감지) |
+| `/weave approve [P#]` | (기본)검증 후 Phase 완료 처리 (phase 생략 시 자동 선택) |
+| `/weave worktree ...` | git worktree 기반 병렬 작업 관리 |
 | `/weave status` | 프로젝트 진행 상황 및 통계 확인 |
 | `/weave help` | 도움말 표시 |
+
+> Tip: OpenCode 채팅에서는 `/weave ...` 형태로 실행하고, 내부적으로는 `weave command=...` 도구 호출로 매핑됩니다.
 
 #### 워크플로우
 
 ```
-1. DESIGN: 문서 분석 → Phase 계획
+0. INIT (1회): /weave init
        ↓
-2. CRAFT: 각 Phase에 대해:
-   ├── 마스크 자동 선택 🎭
-   ├── 테스트 먼저 (Red)
-   ├── 구현 (Green)
-   ├── 리팩토링
-   └── 자체 검증 루프 ✅
-       ├── PASS → 다음 작업
-       └── FAIL → 글로벌 지식 검색 → 재시도 (최대 5회)
+1. 원커맨드(권장): /weave flow docs/
+   - 실행: prepare -> craft -> task auto
        ↓
-3. HANDOFF: 모든 테스트 통과 → 유저가 느낌과 의도 검증
+   (또는 수동 경로)
+       ↓
+2. PLAN (수동): /weave prepare docs/
+   - 또는: /weave spec docs/ → /weave design docs/
+       ↓
+3. CRAFT: /weave craft
+   - Phase 실행 계획(execution plan) 생성 (tasks + 추천 마스크/에이전트 티어)
+       ↓
+4. TASK LOOP: /weave task ... (또는 /weave-task-auto)
+   - PASS → 옵션: quick verify + 원자 커밋
+   - FAIL → 에러 기록 → 글로벌 지식 검색 → 재시도 (최대 5회)
+       ↓
+5. APPROVE: /weave approve
+   - (기본) verify 실행 후 Phase를 completed로 변경
+       ↓
+6. HANDOFF: 유저가 UX/의도 확인 후 다음 Phase로 진행
 ```
 
 #### 다층 AI 검증 시스템
@@ -323,14 +345,33 @@ import { WeaveOrchestrator, GlobalKnowledge } from 'maskweaver/weave';
 
 ## 🧵 Weave 사용 가이드
 
-### 1단계: 설계 (Design)
-
-요구사항 분석으로 시작합니다:
+### 0단계: 초기화 (프로젝트당 1회)
 
 ```bash
+/weave init
+```
+
+### 1단계: 플랜 생성 (Flow 권장)
+
+가장 빠른 원커맨드 경로:
+
+```bash
+/weave flow docs/
+```
+
+한 번에 `prepare -> craft -> task auto`까지 실행합니다.
+
+수동 happy path (spec + plan 한 번에):
+
+```bash
+/weave prepare docs/
+```
+
+또는 spec과 plan을 분리해서 실행:
+
+```bash
+/weave spec docs/
 /weave design docs/
-# 또는
-/weave design wiki/requirements.md
 ```
 
 AI가 수행하는 작업:
@@ -356,22 +397,44 @@ AI 인사이트가 포함된 현대적 감정 일기 앱 구축
 이 계획이 괜찮으세요? 변경이 필요하면 말씀해주세요.
 ```
 
-### 2단계: 승인 & 실행
+### 2단계: Phase 실행 계획 생성 (Craft)
 
 승인 후 실행 시작:
 
 ```bash
-/weave craft P1
+/weave craft
 ```
 
-AI가 수행하는 작업:
-1. 각 작업에 최적의 마스크 선택 (예: 테스트는 켄트 벡)
-2. 테스트 먼저 작성 (Red)
-3. 최소 코드 구현 (Green)
-4. 품질을 위한 리팩토링
-5. 다층 검증 실행
-6. 실패 시: 글로벌 지식 검색 → 최대 5회 재시도
-7. 검증을 위해 유저에게 전달
+`/weave craft`는 Phase를 실행하기 위한 실행 계획을 생성/표시합니다(phase 미지정 시 다음 phase 자동 선택). 이후 실제 진행/상태 업데이트는 `weave command=task ...` 루프로 굴립니다.
+
+### 3단계: Task 루프
+
+```txt
+weave command=task phaseId="P1" taskAction=list
+weave command=task phaseId="P1" taskAction=next
+weave command=task phaseId="P1" taskAction=start taskId="P1-T1"
+weave command=task phaseId="P1" taskAction=pass taskId="P1-T1" verify=true verifyMode="quick"
+weave command=task phaseId="P1" taskAction=fail taskId="P1-T1" taskError="<error message>"
+```
+
+입력을 줄이고 자동으로 굴리려면:
+
+```txt
+weave command=task phaseId="P1" taskAction=auto verify=true verifyMode="quick"
+```
+
+같은 흐름을 원커맨드로 이어서 실행하려면:
+
+```txt
+weave command=flow
+```
+
+### 4단계: 검증 및 Phase 완료 처리
+
+```txt
+weave command=verify
+weave command=approve
+```
 
 진행 상황 출력:
 ```markdown
@@ -392,7 +455,7 @@ AI가 수행하는 작업:
   - 수정: useEffect 의존성 배열 추가
 ```
 
-### 3단계: 핸드오프 & 검증
+### 5단계: 핸드오프 & 검증
 
 모든 검증이 통과되면:
 
@@ -421,7 +484,7 @@ http://localhost:5173
 **[승인]** **[변경 요청]** **[나중에]**
 ```
 
-### 4단계: 언제든지 상태 확인
+### 6단계: 언제든지 상태 확인
 
 ```bash
 /weave status

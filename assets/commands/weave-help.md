@@ -44,15 +44,17 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 | `/weave-init` | Weave 초기화 (프로젝트당 1회) |
 | `/weave-spec [docs]` | 요구사항 정제 + 검증 기준(AC) 추출 (선택) |
 | `/weave-prepare [docs]` | **spec + plan을 한 번에 생성** (vNext 기본 경로) |
+| `/weave-flow [docs]` | **원커맨드** prepare → craft → task auto 실행 |
 | `/weave-design [docs]` | 요구사항 분석 → Phase 계획 (새 플랜 생성) |
 | `/weave-plan [docs]` | `/weave-design` 별칭 (호환용) |
-| `/weave-craft [phase-id]` | 활성 플랜의 Phase 실행 (자동 검증) |
+| `/weave-craft [phase-id]` | 활성 플랜의 Phase 실행 (id 생략 시 다음 Phase 자동 선택) |
 | `/weave-status` | 전체 플랜 목록 + 진행 상황 |
 | `/weave-switch [plan]` | 활성 플랜 전환 / 아카이브 |
 | `/weave-worktree` | git worktree 기반 병렬 작업(기능/Phase) 관리 |
-| `/weave-task` | Task 상태 업데이트(옵션: 빠른 검증/커밋) |
+| `/weave-task` | Task 루프(start/fail/retry/pass/auto) + 옵션 검증/커밋 |
+| `/weave-task-auto [P#|P#-T#]` | 인자 최소화 자동 루프(quick verify 기본) |
 | `/weave-verify` | 빌드/테스트 검증 실행(프로젝트 유형 자동 감지) |
-| `/weave-approve [P#]` | Phase 승인(검증 후 완료 처리, 옵션: 커밋) |
+| `/weave-approve [P#]` | Phase 승인(phase 생략 시 자동 선택, 검증 후 완료 처리) |
 | `/weave-help` | 이 도움말 |
 
 ---
@@ -62,10 +64,12 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 ```
 /weave-init                    ← 프로젝트 초기화 (1회)
     ↓
-/weave-prepare docs/           ← (추천) spec+plan 한 번에 생성
+/weave-flow docs/              ← (원커맨드) prepare→craft→task auto
     ↓
-/weave-craft P1                ← Phase 실행
-/weave-craft P2
+/weave-prepare docs/           ← (수동 경로) spec+plan 한 번에 생성
+    ↓
+/weave-craft                   ← 다음 Phase 자동 선택 실행
+/weave-task-auto               ← 현재 task 반자동 루프
     ↓
 /weave-design wiki/new-feat    ← 두 번째 플랜 추가 (또는 prepare)
     ↓
@@ -139,15 +143,18 @@ Phase 실행 시 자동 검증:
 # 3. 피드백 → 승인
 "좋아, 진행해"
 
-# 4. Phase 실행
-/weave-craft P1
+# 4. 다음 Phase 자동 선택 실행
+/weave-craft
 
-# 5. 테스트 → Approve → 반복
-/weave-craft P2 ...
+# 5. Task 반자동 루프 (구현 후 반복)
+/weave-task-auto
 
-# 6. 새 기능 추가? 새 플랜!
+# 6. 승인 (phase 생략 가능)
+/weave-approve
+
+# 7. 새 기능 추가? 새 플랜!
 /weave-design docs/new-feature
 
-# 7. 플랜 사이 전환
+# 8. 플랜 사이 전환
 /weave-switch emotion-diary
 ```

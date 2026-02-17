@@ -15,6 +15,9 @@ description: spec + plan을 한 번에 생성 (vNext 기본 경로)
 > 목적: 작은 기능마다 spec/plan을 두 번 돌리는 마찰을 줄이고,
 > "바로 craft로 갈 수 있는" 기본 경로(happy path)를 제공합니다.
 
+> 더 단순한 원커맨드가 필요하면 `/weave-flow [docs]`를 사용하세요
+> (`prepare -> craft -> task auto`를 한 번에 실행).
+
 ---
 
 ## 사용법

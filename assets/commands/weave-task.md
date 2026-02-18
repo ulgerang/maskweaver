@@ -40,6 +40,9 @@ weave command=task phaseId="P1" taskAction=auto verify=true verifyMode="quick"
 - 시작 직후에는 구현 대기 상태로 멈춥니다(코드 수정/에이전트 위임 후 재실행).
 - in_progress task에서는 quick verify를 실행하고 통과 시 pass 처리합니다.
 - 검증 실패/커밋 실패/변경 없음이면 해당 task에서 멈추고 다음 액션을 안내합니다.
+- 같은 task 실패가 누적되면(retry 임계치) 자동으로 **re-plan 서브태스크를 생성**하고 루프를 이어갑니다.
+- 상태 변화가 있을 때 `tasks/todo.md`를 동기화합니다.
+- 실패 패턴은 `tasks/lessons.md`에 규칙으로 기록합니다.
 
 ### 3) 시작
 

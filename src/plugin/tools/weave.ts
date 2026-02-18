@@ -10,6 +10,7 @@ import { z } from 'zod';
 const tool = <T>(input: T): T => input;
 
 import * as path from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 import { VERSION } from '../../version.js';
 import { intake } from '../../weave/stages/intake.js';
@@ -80,6 +81,8 @@ Examples:
                 .describe('Skip verification before approve (default: false)'),
             verifyMode: z.enum(['quick', 'full']).optional()
                 .describe('Verification mode: quick (typecheck+tests) or full (all available)'),
+            autoApprove: z.boolean().optional()
+                .describe('Automatically run approve after flow finishes all tasks (default: false)'),
             commit: z.boolean().optional()
                 .describe('Create a git commit on approve (default: false)'),
             stageAll: z.boolean().optional()
@@ -118,6 +121,7 @@ Examples:
                 bootstrapWeave?: boolean;
                 skipVerify?: boolean;
                 verifyMode?: 'quick' | 'full';
+                autoApprove?: boolean;
                 commit?: boolean;
                 stageAll?: boolean;
                 commitMessage?: string;
@@ -336,6 +340,7 @@ async function handleFlow(
         phaseId?: string;
         projectType?: string;
         verifyMode?: 'quick' | 'full';
+        autoApprove?: boolean;
     },
     basePath: string
 ): Promise<string> {
@@ -390,6 +395,51 @@ async function handleFlow(
         return `Error: Phase not found: ${requestedPhaseId}`;
     }
 
+    const phaseBeforeCraft = manager.getPhase(resolvedPhaseId);
+    if (!phaseBeforeCraft) {
+        return `Error: Phase not found: ${resolvedPhaseId}`;
+    }
+
+    // Legacy plans may not have explicit tasks yet.
+    if (!phaseBeforeCraft.tasks || phaseBeforeCraft.tasks.length === 0) {
+        await manager.addTasks(resolvedPhaseId, generateDefaultPhaseTasks(phaseBeforeCraft));
+    }
+
+    const refreshedPhase = manager.getPhase(resolvedPhaseId);
+    if (!refreshedPhase) {
+        return `Error: Phase not found: ${resolvedPhaseId}`;
+    }
+
+    const planGate = evaluatePlanGate(refreshedPhase);
+    lines.push('');
+    lines.push('### Plan Gate');
+    lines.push('');
+    lines.push(`Scope: ${planGate.nonTrivial ? 'non-trivial' : 'simple'}`);
+    for (const check of planGate.checks) {
+        lines.push(`- ${check.passed ? 'PASS' : 'FAIL'}: ${check.label}`);
+    }
+
+    if (!planGate.passed) {
+        lines.push('');
+        lines.push('Flow paused: plan gate failed. Re-plan before implementation.');
+        lines.push(`Run: \`weave command=craft phaseId="${resolvedPhaseId}"\``);
+        lines.push(`Inspect: \`weave command=task phaseId="${resolvedPhaseId}" taskAction=list\``);
+
+        await appendWorkflowLesson(basePath, {
+            trigger: 'plan_gate_failed',
+            pattern: `Phase ${resolvedPhaseId} failed plan gate checks: ${planGate.failedLabels.join(', ')}`,
+            rule: 'Before implementation, ensure phase tasks include implementation, tests, and verification coverage.',
+        });
+        await syncWorkflowArtifacts(basePath, manager, {
+            phaseId: resolvedPhaseId,
+            reviewLines: [
+                `Flow paused at plan gate for ${resolvedPhaseId}.`,
+                `Missing checks: ${planGate.failedLabels.join(', ')}`,
+            ],
+        });
+        return lines.join('\n');
+    }
+
     const craftResult = await handleCraft({
         phaseId: resolvedPhaseId,
         projectType: args.projectType,
@@ -413,10 +463,40 @@ async function handleFlow(
     lines.push('');
     lines.push(autoResult);
 
+    const reviewLines: string[] = [
+        `Flow executed for ${resolvedPhaseId}.`,
+        `Plan gate: PASS (${planGate.nonTrivial ? 'non-trivial' : 'simple'} scope).`,
+    ];
+
     if (autoResult.includes('All tasks done')) {
         lines.push('');
-        lines.push(`Next: \`weave command=approve phaseId="${resolvedPhaseId}"\``);
+        if (args.autoApprove) {
+            const approveResult = await handleApprove({
+                phaseId: resolvedPhaseId,
+                projectType: args.projectType,
+                verifyMode: 'full',
+            }, basePath);
+
+            lines.push('### 4) Approve');
+            lines.push('');
+            lines.push(approveResult);
+
+            reviewLines.push(approveResult.includes('❌')
+                ? `Auto-approve failed for ${resolvedPhaseId}.`
+                : `Auto-approve completed for ${resolvedPhaseId}.`);
+        } else {
+            lines.push(`Next: \`weave command=approve phaseId="${resolvedPhaseId}"\``);
+            lines.push('Tip: set `autoApprove=true` in flow to auto-run full verification + approve.');
+            reviewLines.push(`All tasks done for ${resolvedPhaseId}; waiting for manual approve.`);
+        }
+    } else {
+        reviewLines.push(`Task auto paused for ${resolvedPhaseId}; continue from current task.`);
     }
+
+    await syncWorkflowArtifacts(basePath, manager, {
+        phaseId: resolvedPhaseId,
+        reviewLines,
+    });
 
     return lines.join('\n');
 }
@@ -878,6 +958,14 @@ async function handleTask(
         return lines.join('\n');
     };
 
+    const finalize = async (message: string, reviewLines: string[]): Promise<string> => {
+        await syncWorkflowArtifacts(basePath, manager, {
+            phaseId,
+            reviewLines,
+        });
+        return message;
+    };
+
     const passTask = async (task: { id: string; name: string }) => {
         // Guardrail: don't mark task as passed when nothing changed.
         const snapshotKey = getTaskSnapshotKey(basePath, phaseId, task.id);
@@ -1085,10 +1173,12 @@ async function handleTask(
             }
             await manager.updateTaskStatus(phaseId, task.id, 'in_progress');
             await captureTaskSnapshot(basePath, phaseId, task.id);
-            return [
+            return finalize([
                 `✅ Task started: ${task.id} — ${task.name}`,
                 'Note: start only updates task state. Code changes are done by implementation work (you/agent), then pass/auto verifies.',
-            ].join('\n');
+            ].join('\n'), [
+                `Task started: ${task.id}`,
+            ]);
         }
 
         case 'retry': {
@@ -1098,7 +1188,9 @@ async function handleTask(
             }
             await manager.updateTaskStatus(phaseId, task.id, 'in_progress', { lastError: undefined });
             await captureTaskSnapshot(basePath, phaseId, task.id);
-            return `🔄 Task retry: ${task.id} — ${task.name}`;
+            return finalize(`🔄 Task retry: ${task.id} — ${task.name}`, [
+                `Task retried: ${task.id}`,
+            ]);
         }
 
         case 'fail': {
@@ -1148,7 +1240,19 @@ async function handleTask(
 
             lines.push('');
             lines.push(`Retry: \`weave command=task taskAction=retry phaseId="${phaseId}" taskId="${task.id}"\``);
-            return lines.join('\n');
+
+            if (err) {
+                await appendWorkflowLesson(basePath, {
+                    trigger: `task_fail:${task.id}`,
+                    pattern: sanitizeLessonText(err),
+                    rule: 'Capture concrete failure context, then retry only after implementation changes.',
+                });
+            }
+
+            return finalize(lines.join('\n'), [
+                `Task failed: ${task.id}`,
+                err ? `Error captured for ${task.id}.` : `Failure recorded without error details for ${task.id}.`,
+            ]);
         }
 
         case 'pass': {
@@ -1158,19 +1262,33 @@ async function handleTask(
             }
             const result = await passTask(task);
             if (!result.ok) {
-                return result.body;
+                if ((result as any).reason === 'verification_failed') {
+                    await appendWorkflowLesson(basePath, {
+                        trigger: `task_pass_verification_failed:${task.id}`,
+                        pattern: sanitizeLessonText(result.body),
+                        rule: 'Do not mark task done until verification passes. Fix root cause and rerun pass.',
+                    });
+                }
+                return finalize(result.body, [
+                    `Task pass blocked: ${task.id} (${(result as any).reason || 'unknown'}).`,
+                ]);
             }
             const next = nextActionable();
-            return [
+            return finalize([
                 result.body,
                 next ? '' : '',
                 next ? `Next: \`${next.id}\` (${next.status}) — ${next.name}` : `All tasks done for ${phaseId}. Run: weave command=approve phaseId="${phaseId}"`,
-            ].filter(Boolean).join('\n');
+            ].filter(Boolean).join('\n'), [
+                `Task passed: ${task.id}`,
+                next ? `Next actionable task: ${next.id}.` : `All tasks passed for ${phaseId}.`,
+            ]);
         }
 
         case 'auto': {
             if (currentPhase().tasks.length === 0) {
-                return `No tasks found for ${phaseId}. Run \`weave craft ${phaseId}\` to seed/generate tasks.`;
+                return finalize(`No tasks found for ${phaseId}. Run \`weave craft ${phaseId}\` to seed/generate tasks.`, [
+                    `Auto loop paused: no tasks in ${phaseId}.`,
+                ]);
             }
 
             const lines: string[] = [];
@@ -1188,7 +1306,9 @@ async function handleTask(
                 if (!next) {
                     lines.push(`✅ All tasks done for ${phaseId}.`);
                     lines.push(`Next: \`weave command=approve phaseId="${phaseId}"\``);
-                    return lines.join('\n');
+                    return finalize(lines.join('\n'), [
+                        `Auto loop completed: all tasks done for ${phaseId}.`,
+                    ]);
                 }
 
                 steps += 1;
@@ -1205,7 +1325,9 @@ async function handleTask(
                     }
                     lines.push(`Implement/delegate this task first, then rerun auto.`);
                     lines.push(`Continue: \`weave command=task phaseId="${phaseId}" taskAction=auto taskId="${next.id}"\``);
-                    return lines.join('\n');
+                    return finalize(lines.join('\n'), [
+                        `Auto loop waiting for implementation on ${next.id}.`,
+                    ]);
                 }
 
                 lines.push(`▶ Verifying: ${next.id} — ${next.name}`);
@@ -1213,7 +1335,9 @@ async function handleTask(
                 const task = findTask(next.id);
                 if (!task) {
                     lines.push(`❌ Task disappeared: ${next.id}`);
-                    return lines.join('\n');
+                    return finalize(lines.join('\n'), [
+                        `Auto loop error: task disappeared (${next.id}).`,
+                    ]);
                 }
 
                 const result = await passTask(task);
@@ -1224,17 +1348,64 @@ async function handleTask(
                     if ((result as any).reason === 'no_changes') {
                         lines.push(`⏸ Waiting for implementation changes on: ${task.id}`);
                         lines.push(`Resume after code changes: \`weave command=task phaseId="${phaseId}" taskAction=auto taskId="${task.id}"\``);
-                        return lines.join('\n');
+                        return finalize(lines.join('\n'), [
+                            `Auto loop waiting for code changes on ${task.id}.`,
+                        ]);
                     }
+
+                    const failedTask = findTask(task.id);
+                    const retries = failedTask?.retryCount || 0;
+                    const maxRetries = failedTask?.maxRetries || 5;
+                    const replanThreshold = Math.min(maxRetries, DEFAULT_REPLAN_THRESHOLD);
+                    if (retries >= replanThreshold) {
+                        const replan = await autoReplanFailedTask(manager, phaseId, task.id, {
+                            reason: failedTask?.lastError || result.body,
+                        });
+
+                        if (replan && replan.newTaskIds.length > 0) {
+                            lines.push(`🧭 Auto re-plan created ${replan.newTaskIds.length} subtasks from ${task.id}.`);
+                            lines.push(`Subtasks: ${replan.newTaskIds.map(id => `\`${id}\``).join(', ')}`);
+                            lines.push('Continuing auto loop with the first replanned subtask.');
+
+                            await appendWorkflowLesson(basePath, {
+                                trigger: `task_auto_replan:${task.id}`,
+                                pattern: `Task ${task.id} hit ${retries} failures in auto loop.`,
+                                rule: 'When repeated failures occur, split the task into smaller subtasks and continue iteratively.',
+                            });
+
+                            preferredTaskId = replan.newTaskIds[0];
+                            continue;
+                        }
+
+                        lines.push(`🛑 Re-plan triggered: ${task.id} failed ${retries} times, but subtask generation failed.`);
+                        lines.push('Stop and refine the plan before retrying the same implementation path.');
+                        lines.push(`Inspect: \`weave command=task phaseId="${phaseId}" taskAction=list\``);
+                        lines.push(`Refresh strategy: \`weave command=craft phaseId="${phaseId}"\``);
+
+                        await appendWorkflowLesson(basePath, {
+                            trigger: `task_auto_replan_failed:${task.id}`,
+                            pattern: `Task ${task.id} failed ${retries} times and automatic re-plan generation failed.`,
+                            rule: 'If automatic re-plan fails, perform manual plan refinement before retry.',
+                        });
+
+                        return finalize(lines.join('\n'), [
+                            `Auto loop re-plan fallback for ${task.id} after ${retries} failures.`,
+                        ]);
+                    }
+
                     lines.push(`⏸ Stopped at failed task: ${task.id}`);
                     lines.push(`Fix code, then rerun: \`weave command=task phaseId="${phaseId}" taskAction=auto\``);
-                    return lines.join('\n');
+                    return finalize(lines.join('\n'), [
+                        `Auto loop stopped at failed task ${task.id}.`,
+                    ]);
                 }
             }
 
             lines.push('⚠️ Auto loop stopped at safety limit.');
             lines.push(`Inspect with: \`weave command=task phaseId="${phaseId}" taskAction=list\``);
-            return lines.join('\n');
+            return finalize(lines.join('\n'), [
+                `Auto loop safety stop in ${phaseId}.`,
+            ]);
         }
     }
 }
@@ -1357,6 +1528,14 @@ async function handleApprove(
         return 'Error: No phase found to approve. Run `weave craft` first.';
     }
 
+    const finalizeApprove = async (message: string, reviewLines: string[]): Promise<string> => {
+        await syncWorkflowArtifacts(basePath, phaseManager, {
+            phaseId: resolvedPhaseId,
+            reviewLines,
+        });
+        return message;
+    };
+
     if (!skipVerify) {
         const verification = await runAIVerification({
             projectType: projectType || 'unknown',
@@ -1369,27 +1548,31 @@ async function handleApprove(
         const report = generateVerificationReport(verification.results);
 
         if (!verification.passed) {
-            return [
+            return finalizeApprove([
                 report,
                 '',
                 `❌ Verification failed at: ${verification.failedAt || 'unknown'}`,
                 '',
                 'Fix the failures and re-run approve.',
                 'You can also run: `weave command=verify`',
-            ].join('\n');
+            ].join('\n'), [
+                `Approve blocked: verification failed for ${resolvedPhaseId}.`,
+            ]);
         }
 
         // If no commands detected, allow approve but make it explicit.
         if (verification.results.length === 0) {
             await phaseManager.markAllTasksPassed(resolvedPhaseId);
             const result = await handleUserResponse(resolvedPhaseId, 'approve', undefined, basePath);
-            return [
+            return finalizeApprove([
                 report,
                 '',
                 '> No verification commands detected; approved without automated checks.',
                 '',
                 result.message,
-            ].join('\n');
+            ].join('\n'), [
+                `Approved ${resolvedPhaseId} without automated verification commands.`,
+            ]);
         }
 
         // Optional: commit on approve
@@ -1402,7 +1585,7 @@ async function handleApprove(
                 } else {
                     const hasStaged = await hasStagedChanges(basePath);
                     if (!hasStaged) {
-                        return [
+                        return finalizeApprove([
                             report,
                             '',
                             '❌ No staged changes to commit.',
@@ -1411,7 +1594,9 @@ async function handleApprove(
                             '```txt',
                             `weave command=approve phaseId="${resolvedPhaseId}" commit=true stageAll=true`,
                             '```',
-                        ].join('\n');
+                        ].join('\n'), [
+                            `Approve commit blocked: no staged changes for ${resolvedPhaseId}.`,
+                        ]);
                     }
                 }
 
@@ -1419,11 +1604,13 @@ async function handleApprove(
                 const secretCfg = loadSecretScanConfig(basePath);
                 const findings = scanFilesForSecrets({ projectPath: basePath, files: stagedFiles, config: secretCfg });
                 if (findings.length > 0 && shouldBlockOnFindings(findings, secretCfg)) {
-                    return [
+                    return finalizeApprove([
                         report,
                         '',
                         formatSecretScanReport(findings),
-                    ].join('\n');
+                    ].join('\n'), [
+                        `Approve commit blocked by secret scan in ${resolvedPhaseId}.`,
+                    ]);
                 }
 
                 const secretWarning = findings.length > 0
@@ -1442,7 +1629,7 @@ async function handleApprove(
 
                 await phaseManager.markAllTasksPassed(resolvedPhaseId);
                 const result = await handleUserResponse(resolvedPhaseId, 'approve', undefined, basePath);
-                return [
+                return finalizeApprove([
                     report,
                     '',
                     secretWarning ? secretWarning : '',
@@ -1450,14 +1637,18 @@ async function handleApprove(
                     commitOutput ? ['```', commitOutput, '```'].join('\n') : '',
                     '',
                     result.message,
-                ].filter(Boolean).join('\n');
+                ].filter(Boolean).join('\n'), [
+                    `Approved ${resolvedPhaseId} with commit.`,
+                ]);
             } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
-                return [
+                return finalizeApprove([
                     report,
                     '',
                     `❌ Commit failed: ${msg}`,
-                ].join('\n');
+                ].join('\n'), [
+                    `Approve commit failed for ${resolvedPhaseId}: ${sanitizeLessonText(msg)}`,
+                ]);
             }
         }
 
@@ -1466,15 +1657,19 @@ async function handleApprove(
             await phaseManager.markAllTasksPassed(resolvedPhaseId);
         }
         const result = await handleUserResponse(resolvedPhaseId, 'approve', undefined, basePath);
-        return [
+        return finalizeApprove([
             report,
             '',
             result.message,
-        ].join('\n');
+        ].join('\n'), [
+            `Approved ${resolvedPhaseId} after verification pass.`,
+        ]);
     }
 
     const result = await handleUserResponse(resolvedPhaseId, 'approve', undefined, basePath);
-    return result.message;
+    return finalizeApprove(result.message, [
+        `Approved ${resolvedPhaseId} with skipVerify=true.`,
+    ]);
 }
 
 function getHelpMessage(): string {
@@ -1523,9 +1718,279 @@ To check installed version:
 \`\`\`
 weave flow docs/                                         # One-command path
 weave flow                                               # Continue active plan/task
+weave flow autoApprove=true                              # Auto-run full verify + approve when tasks finish
 weave approve                                            # Auto-select current phase + full verify
 \`\`\`
 `;
+}
+
+const DEFAULT_REPLAN_THRESHOLD = 2;
+
+type PlanGateCheck = {
+    label: string;
+    passed: boolean;
+};
+
+function evaluatePlanGate(phase: {
+    id: string;
+    doneWhen?: string;
+    estimatedHours?: number;
+    tasks: Array<{ name: string; testCase?: string }>;
+}): {
+    nonTrivial: boolean;
+    passed: boolean;
+    checks: PlanGateCheck[];
+    failedLabels: string[];
+} {
+    const tasks = phase.tasks || [];
+    const nonTrivial = tasks.length >= 3 || (phase.estimatedHours || 0) >= 4;
+
+    const taskText = tasks
+        .map(task => `${task.name} ${task.testCase || ''}`.toLowerCase())
+        .join('\n');
+
+    const checks: PlanGateCheck[] = [
+        {
+            label: nonTrivial
+                ? 'Task granularity (>=3 executable tasks for non-trivial work)'
+                : 'Task granularity (>=1 executable task)',
+            passed: tasks.length >= (nonTrivial ? 3 : 1),
+        },
+        {
+            label: 'Test coverage task exists',
+            passed: /\btest\b|테스트/.test(taskText),
+        },
+        {
+            label: 'Verification/build task exists',
+            passed: /\bverify\b|검증|\bbuild\b|\btypecheck\b/.test(taskText),
+        },
+        {
+            label: 'Phase done_when exists',
+            passed: typeof phase.doneWhen === 'string' && phase.doneWhen.trim().length > 0,
+        },
+    ];
+
+    const failedLabels = checks.filter(check => !check.passed).map(check => check.label);
+    return {
+        nonTrivial,
+        passed: failedLabels.length === 0,
+        checks,
+        failedLabels,
+    };
+}
+
+type AutoReplanResult = {
+    sourceTaskId: string;
+    newTaskIds: string[];
+};
+
+async function autoReplanFailedTask(
+    manager: ReturnType<typeof getPhaseManager>,
+    phaseId: string,
+    taskId: string,
+    options: {
+        reason?: string;
+    }
+): Promise<AutoReplanResult | null> {
+    const plan = await manager.loadPlan();
+    if (!plan) return null;
+
+    const phase = plan.phases.find(p => p.id === phaseId);
+    if (!phase || !phase.tasks || phase.tasks.length === 0) return null;
+
+    const taskIndex = phase.tasks.findIndex(task => task.id === taskId);
+    if (taskIndex < 0) return null;
+
+    const sourceTask = phase.tasks[taskIndex];
+    const retryCount = sourceTask.retryCount || 0;
+    if (retryCount <= 0) return null;
+
+    // Freeze the repeatedly failing task so task auto can move on to replanned subtasks.
+    sourceTask.status = 'failed';
+    sourceTask.maxRetries = Math.max(1, retryCount);
+    sourceTask.retryCount = Math.max(retryCount, sourceTask.maxRetries);
+    sourceTask.lastError = mergeTaskError(sourceTask.lastError, options.reason);
+
+    const reasonSummary = sanitizeLessonText(options.reason || sourceTask.lastError || 'unknown failure', 120);
+    const baseTaskName = sourceTask.name;
+
+    const firstIdNumber = getNextTaskNumber(phase.tasks);
+    const subtasks = [
+        {
+            id: `${phaseId}-T${firstIdNumber}`,
+            name: `${baseTaskName} [re-plan] 원인 분해`,
+            status: 'pending' as const,
+            retryCount: 0,
+            maxRetries: 2,
+            testCase: `반복 실패 원인을 좁힌다: ${reasonSummary}`,
+            lastError: undefined,
+            maskUsed: undefined,
+        },
+        {
+            id: `${phaseId}-T${firstIdNumber + 1}`,
+            name: `${baseTaskName} [re-plan] 최소 수정 구현`,
+            status: 'pending' as const,
+            retryCount: 0,
+            maxRetries: 3,
+            testCase: sourceTask.testCase || '핵심 동작이 정상 동작한다',
+            lastError: undefined,
+            maskUsed: undefined,
+        },
+        {
+            id: `${phaseId}-T${firstIdNumber + 2}`,
+            name: `${baseTaskName} [re-plan] 검증 및 회귀 확인`,
+            status: 'pending' as const,
+            retryCount: 0,
+            maxRetries: 2,
+            testCase: '관련 테스트와 검증이 통과한다',
+            lastError: undefined,
+            maskUsed: undefined,
+        },
+    ];
+
+    phase.tasks.splice(taskIndex + 1, 0, ...subtasks);
+    await manager.savePlan(plan);
+
+    return {
+        sourceTaskId: sourceTask.id,
+        newTaskIds: subtasks.map(task => task.id),
+    };
+}
+
+function getNextTaskNumber(tasks: Array<{ id: string }>): number {
+    let max = 0;
+    for (const task of tasks) {
+        const match = /-T(\d+)$/i.exec(task.id);
+        if (!match) continue;
+        const value = Number.parseInt(match[1], 10);
+        if (Number.isFinite(value) && value > max) {
+            max = value;
+        }
+    }
+    return max + 1;
+}
+
+function mergeTaskError(existing: string | undefined, reason: string | undefined): string | undefined {
+    const normalizedReason = reason ? sanitizeLessonText(reason, 180) : '';
+    const base = existing ? existing.trim() : '';
+
+    if (!normalizedReason) return base || undefined;
+    if (!base) return `Auto re-plan reason: ${normalizedReason}`;
+    if (base.includes(normalizedReason)) return base;
+    return `${base} | Auto re-plan reason: ${normalizedReason}`;
+}
+
+async function syncWorkflowArtifacts(
+    basePath: string,
+    manager: ReturnType<typeof getPhaseManager>,
+    options: {
+        phaseId?: string;
+        reviewLines?: string[];
+    }
+): Promise<void> {
+    try {
+        const plan = await manager.loadPlan();
+        if (!plan) return;
+
+        const tasksDir = path.join(basePath, 'tasks');
+        await mkdir(tasksDir, { recursive: true });
+
+        const todoPath = path.join(tasksDir, 'todo.md');
+        const lines: string[] = [];
+        const currentPhaseId = options.phaseId
+            || plan.currentPhase
+            || plan.phases.find(phase => phase.status === 'in_progress')?.id
+            || plan.phases.find(phase => phase.status !== 'completed')?.id;
+
+        lines.push('# Todo');
+        lines.push('');
+        lines.push(`- Updated: ${new Date().toISOString()}`);
+        lines.push(`- Plan: \`${plan.planName || 'active-plan'}\``);
+        lines.push(`- Focus phase: \`${currentPhaseId || 'none'}\``);
+        lines.push('');
+        lines.push('## Checklist');
+        lines.push('');
+
+        for (const phase of plan.phases) {
+            const phaseDone = phase.status === 'completed';
+            lines.push(`- [${phaseDone ? 'x' : ' '}] ${phase.id} ${phase.name} (${phase.status})`);
+            const tasks = phase.tasks || [];
+            if (tasks.length === 0) {
+                lines.push('  - [ ] (no tasks)');
+                continue;
+            }
+
+            for (const task of tasks) {
+                const taskDone = task.status === 'passed';
+                const retries = `${task.retryCount || 0}/${task.maxRetries || 5}`;
+                lines.push(`  - [${taskDone ? 'x' : ' '}] ${task.id} ${task.name} (${task.status}, retries ${retries})`);
+            }
+        }
+
+        lines.push('');
+        lines.push('## Review');
+        lines.push('');
+        const reviewLines = options.reviewLines && options.reviewLines.length > 0
+            ? options.reviewLines
+            : ['Pending'];
+        for (const reviewLine of reviewLines) {
+            lines.push(`- ${reviewLine}`);
+        }
+
+        await writeFile(todoPath, `${lines.join('\n')}\n`, 'utf-8');
+    } catch {
+        // Non-fatal: artifact sync should never break workflow execution.
+    }
+}
+
+function sanitizeLessonText(input: string, maxLength = 240): string {
+    return input
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, maxLength);
+}
+
+async function appendWorkflowLesson(
+    basePath: string,
+    lesson: {
+        trigger: string;
+        pattern: string;
+        rule: string;
+    }
+): Promise<void> {
+    try {
+        const tasksDir = path.join(basePath, 'tasks');
+        await mkdir(tasksDir, { recursive: true });
+
+        const lessonsPath = path.join(tasksDir, 'lessons.md');
+        let current = '';
+        try {
+            current = await readFile(lessonsPath, 'utf-8');
+        } catch {
+            current = [
+                '# Lessons',
+                '',
+                '## Rules',
+                '- Stop and re-plan when the same task fails repeatedly.',
+                '- Verify behavior before marking work done.',
+                '- Capture failure patterns as explicit prevention rules.',
+                '',
+            ].join('\n');
+        }
+
+        const stamp = new Date().toISOString();
+        const entry = [
+            `## ${stamp}`,
+            `- Trigger: ${sanitizeLessonText(lesson.trigger)}`,
+            `- Pattern: ${sanitizeLessonText(lesson.pattern)}`,
+            `- Rule: ${sanitizeLessonText(lesson.rule)}`,
+            '',
+        ].join('\n');
+
+        await writeFile(lessonsPath, `${current.trimEnd()}\n\n${entry}`, 'utf-8');
+    } catch {
+        // Non-fatal: lesson capture should not block task execution.
+    }
 }
 
 function resolveUnderBase(basePath: string, inputPath: string): string {

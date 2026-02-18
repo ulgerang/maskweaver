@@ -9,8 +9,11 @@ description: 원커맨드 실행 (prepare -> craft -> task auto)
 `/weave-flow`는 Weave의 기본 경로를 한 번에 실행합니다.
 
 - `prepare` (필요 시): spec + plan 생성
+- `plan gate`: 실행 전 계획 품질 점검 (task 분해/테스트/검증 커버리지)
 - `craft`: 실행 대상 phase 준비
 - `task auto`: 현재 task 자동 루프 진입
+- `task auto` 내 반복 실패 시 re-plan 서브태스크 자동 생성
+- (옵션) `approve`: 모든 task가 끝나면 full verify + phase approve
 
 > 목표: 유저가 명령을 여러 번 기억하지 않고, 한 번의 호출로 바로 실행 흐름에 진입하도록 합니다.
 
@@ -43,6 +46,21 @@ weave command=flow
 ```
 
 기본 검증 모드는 quick입니다(`verifyMode="quick"`).
+
+모든 task 완료 후 자동 approve를 원하면:
+
+```txt
+weave command=flow autoApprove=true
+```
+
+`autoApprove=true`면 내부적으로 `weave approve`(full verify)를 실행합니다.
+
+---
+
+## 산출물
+
+- `tasks/todo.md`: 현재 plan/phase/task 체크리스트 + 최근 리뷰
+- `tasks/lessons.md`: 실패 패턴과 재발 방지 규칙 기록
 
 ---
 

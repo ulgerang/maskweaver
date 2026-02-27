@@ -191,8 +191,11 @@ Weave is Maskweaver's flagship workflow. It breaks work into testable phases, au
 | Command | Description |
 |---------|-------------|
 | `/weave init` | Initialize Weave (once per repo) |
-| `/weave prepare [docs]` | (Manual path) Generate baseline spec + phase plan |
-| `/weave flow [docs]` | (Recommended) One-command path: prepare -> craft -> task auto |
+| `/weave research [docs]` | Deep-read docs and generate persistent `tasks/research.md` |
+| `/weave prepare [docs]` | (Manual path) Generate research + baseline spec + phase plan |
+| `/weave refine-plan` | Apply structured plan notes (`tasks/plan-notes.md`) to active plan |
+| `/weave approve-plan` | Explicit human approval gate before implementation |
+| `/weave flow [docs]` | (Recommended) One-command path: prepare -> approve-plan gate -> craft -> task auto |
 | `/weave spec [docs]` | Generate baseline spec only (optional) |
 | `/weave design [docs]` | Analyze requirements → Generate phase plan (`/weave plan` is an alias) |
 | `/weave craft [P#]` | Generate/run execution plan (auto-select next phase if omitted) |
@@ -212,24 +215,30 @@ Weave is Maskweaver's flagship workflow. It breaks work into testable phases, au
 0. INIT (once): /weave init
        ↓
 1. ONE-COMMAND (recommended): /weave flow docs/
-   - runs: prepare -> craft -> task auto
+    - runs: prepare -> approve-plan gate -> craft -> task auto
        ↓
    (or manual path)
        ↓
 2. PLAN (manual path): /weave prepare docs/
-   - or: /weave spec docs/ → /weave design docs/
+    - or: /weave research docs/ → /weave spec docs/ → /weave design docs/
        ↓
-3. CRAFT: /weave craft
-    - Generates an execution plan (tasks + suggested masks/agent tiers)
+3. REFINE (optional): /weave refine-plan
+    - apply annotation notes from tasks/plan-notes.md
        ↓
-4. TASK LOOP: /weave task ... (or /weave-task-auto)
-    - PASS → optional quick verify + optional atomic commit
-    - FAIL → record error → search Global Knowledge → retry (max 5)
+4. APPROVAL GATE: /weave approve-plan
+    - required before craft/task execution
        ↓
-5. APPROVE: /weave approve
-    - Runs verification (full by default) and marks the phase completed
+5. CRAFT: /weave craft
+     - Generates an execution plan (tasks + suggested masks/agent tiers)
        ↓
-6. HANDOFF: You validate UX/intent and move to next phase
+6. TASK LOOP: /weave task ... (or /weave-task-auto)
+     - PASS → optional quick verify + optional atomic commit
+     - FAIL → record error → search Global Knowledge → retry (max 5)
+       ↓
+7. APPROVE: /weave approve
+     - Runs verification (full by default) and marks the phase completed
+       ↓
+8. HANDOFF: You validate UX/intent and move to next phase
 ```
 
 #### Multi-Layer AI Verification
@@ -378,19 +387,22 @@ Fastest path (one command):
 /weave flow docs/
 ```
 
-This runs `prepare -> craft -> task auto` in one shot.
+This runs `prepare -> approve-plan gate -> craft -> task auto` in one shot.
 
-Manual happy path (spec + plan in one command):
+Manual happy path (research + spec + plan in one command):
 
 ```bash
 /weave prepare docs/
+/weave approve-plan
 ```
 
-Or run spec and plan separately:
+Or run the full pipeline separately:
 
 ```bash
+/weave research docs/
 /weave spec docs/
 /weave design docs/
+/weave approve-plan
 ```
 
 The AI will:
@@ -416,7 +428,13 @@ Build a modern emotion diary app with AI-powered insights
 Is this plan okay? Let me know if changes are needed.
 ```
 
-### Step 2: Craft a Phase (Auto-select if omitted)
+### Step 2: Approve the Plan (Required)
+
+```bash
+/weave approve-plan
+```
+
+### Step 3: Craft a Phase (Auto-select if omitted)
 
 Start with the first phase:
 
@@ -426,7 +444,7 @@ Start with the first phase:
 
 `/weave craft` returns an execution plan the Mask Weaver can delegate/execute. Use `/weave task` (or `/weave-task-auto`) to drive the task loop and keep the plan state updated.
 
-### Step 3: Drive the Task Loop
+### Step 4: Drive the Task Loop
 
 ```txt
 weave command=task phaseId="P1" taskAction=list
@@ -448,7 +466,7 @@ You can also continue everything with one command:
 weave command=flow
 ```
 
-### Step 4: Verify and Approve the Phase
+### Step 5: Verify and Approve the Phase
 
 ```txt
 weave command=verify

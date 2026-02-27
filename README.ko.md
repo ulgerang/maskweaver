@@ -172,8 +172,11 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
 | 명령어 | 설명 |
 |--------|------|
 | `/weave init` | Weave 초기화 (프로젝트당 1회) |
-| `/weave prepare [docs]` | (수동 경로) baseline spec + phase plan 한 번에 생성 |
-| `/weave flow [docs]` | (권장) 원커맨드 경로: prepare -> craft -> task auto |
+| `/weave research [docs]` | 문서를 깊게 읽고 `tasks/research.md` 생성 |
+| `/weave prepare [docs]` | (수동 경로) research + baseline spec + phase plan 생성 |
+| `/weave refine-plan` | `tasks/plan-notes.md` 지시문을 active plan에 반영 |
+| `/weave approve-plan` | 구현 전 사람이 계획 승인(게이트) |
+| `/weave flow [docs]` | (권장) 원커맨드 경로: prepare -> approve-plan gate -> craft -> task auto |
 | `/weave spec [docs]` | baseline spec만 생성 (선택) |
 | `/weave design [docs]` | 요구사항 분석 → Phase 계획 생성 (`/weave plan`은 별칭/호환) |
 | `/weave craft [P#]` | Phase 실행 계획 생성/실행 (phase 생략 시 자동 선택) |
@@ -193,24 +196,30 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
 0. INIT (1회): /weave init
        ↓
 1. 원커맨드(권장): /weave flow docs/
-   - 실행: prepare -> craft -> task auto
+    - 실행: prepare -> approve-plan gate -> craft -> task auto
        ↓
    (또는 수동 경로)
        ↓
 2. PLAN (수동): /weave prepare docs/
-   - 또는: /weave spec docs/ → /weave design docs/
+    - 또는: /weave research docs/ → /weave spec docs/ → /weave design docs/
        ↓
-3. CRAFT: /weave craft
-   - Phase 실행 계획(execution plan) 생성 (tasks + 추천 마스크/에이전트 티어)
+3. REFINE (선택): /weave refine-plan
+    - tasks/plan-notes.md 기반 계획 정제
        ↓
-4. TASK LOOP: /weave task ... (또는 /weave-task-auto)
-   - PASS → 옵션: quick verify + 원자 커밋
-   - FAIL → 에러 기록 → 글로벌 지식 검색 → 재시도 (최대 5회)
+4. APPROVAL GATE: /weave approve-plan
+    - craft/task 실행 전 필수 승인
        ↓
-5. APPROVE: /weave approve
-   - (기본) verify 실행 후 Phase를 completed로 변경
+5. CRAFT: /weave craft
+    - Phase 실행 계획(execution plan) 생성 (tasks + 추천 마스크/에이전트 티어)
        ↓
-6. HANDOFF: 유저가 UX/의도 확인 후 다음 Phase로 진행
+6. TASK LOOP: /weave task ... (또는 /weave-task-auto)
+    - PASS → 옵션: quick verify + 원자 커밋
+    - FAIL → 에러 기록 → 글로벌 지식 검색 → 재시도 (최대 5회)
+       ↓
+7. APPROVE: /weave approve
+    - (기본) verify 실행 후 Phase를 completed로 변경
+       ↓
+8. HANDOFF: 유저가 UX/의도 확인 후 다음 Phase로 진행
 ```
 
 #### 다층 AI 검증 시스템
@@ -359,19 +368,22 @@ import { WeaveOrchestrator, GlobalKnowledge } from 'maskweaver/weave';
 /weave flow docs/
 ```
 
-한 번에 `prepare -> craft -> task auto`까지 실행합니다.
+한 번에 `prepare -> approve-plan gate -> craft -> task auto`까지 실행합니다.
 
-수동 happy path (spec + plan 한 번에):
+수동 happy path (research + spec + plan 한 번에):
 
 ```bash
 /weave prepare docs/
+/weave approve-plan
 ```
 
-또는 spec과 plan을 분리해서 실행:
+또는 전체 파이프라인을 분리해서 실행:
 
 ```bash
+/weave research docs/
 /weave spec docs/
 /weave design docs/
+/weave approve-plan
 ```
 
 AI가 수행하는 작업:
@@ -397,7 +409,13 @@ AI 인사이트가 포함된 현대적 감정 일기 앱 구축
 이 계획이 괜찮으세요? 변경이 필요하면 말씀해주세요.
 ```
 
-### 2단계: Phase 실행 계획 생성 (Craft)
+### 2단계: 계획 승인(필수)
+
+```bash
+/weave approve-plan
+```
+
+### 3단계: Phase 실행 계획 생성 (Craft)
 
 승인 후 실행 시작:
 
@@ -407,7 +425,7 @@ AI 인사이트가 포함된 현대적 감정 일기 앱 구축
 
 `/weave craft`는 Phase를 실행하기 위한 실행 계획을 생성/표시합니다(phase 미지정 시 다음 phase 자동 선택). 이후 실제 진행/상태 업데이트는 `weave command=task ...` 루프로 굴립니다.
 
-### 3단계: Task 루프
+### 4단계: Task 루프
 
 ```txt
 weave command=task phaseId="P1" taskAction=list
@@ -429,7 +447,7 @@ weave command=task phaseId="P1" taskAction=auto verify=true verifyMode="quick"
 weave command=flow
 ```
 
-### 4단계: 검증 및 Phase 완료 처리
+### 5단계: 검증 및 Phase 완료 처리
 
 ```txt
 weave command=verify
@@ -455,7 +473,7 @@ weave command=approve
   - 수정: useEffect 의존성 배열 추가
 ```
 
-### 5단계: 핸드오프 & 검증
+### 6단계: 핸드오프 & 검증
 
 모든 검증이 통과되면:
 

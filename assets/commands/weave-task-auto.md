@@ -5,6 +5,8 @@ description: Task 루프 자동 실행 (phase/task 인자 최소화)
 # /weave-task-auto - Task 자동 루프
 
 > 처음부터 한 번에 실행하려면 `/weave-flow [docs]`를 사용하세요.
+>
+> active plan이 승인되지 않았다면 먼저 `/weave-approve-plan`을 실행해야 합니다.
 
 ## 사용법
 

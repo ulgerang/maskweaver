@@ -14,6 +14,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 import { VERSION } from '../../version.js';
 import { intake } from '../../weave/stages/intake.js';
+import { writeResearchReport } from '../../weave/stages/research.js';
+import { refinePlanFromNotes } from '../../weave/stages/refine.js';
 import { spec as createSpec } from '../../weave/stages/spec.js';
 import { plan } from '../../weave/stages/plan.js';
 import { execute, preparePhaseExecution, formatExecutionPlan, runAIVerification, generateVerificationReport } from '../../weave/stages/execute.js';
@@ -25,6 +27,7 @@ import { ensureGitRepo, stageAllChanges, listStagedFiles, hasStagedChanges, getW
 import { scanFilesForSecrets, loadSecretScanConfig, shouldBlockOnFindings, formatSecretScanReport } from '../../weave/security/secret-scan.js';
 import { searchTroubleshooting, recordTroubleshooting, GlobalKnowledge } from '../../weave/knowledge/global.js';
 import { getOrchestrator } from '../../weave/orchestrator.js';
+import type { WeavePlan } from '../../weave/types.js';
 
 // ============================================================================
 // Tool Factory
@@ -35,10 +38,13 @@ export function createWeaveTool() {
         description: `Weave: Phase-driven development workflow with expert mask auto-selection and cross-project knowledge sharing.
 
 Commands:
+- research [docsPath]: Deep-read docs and write persistent research.md
 - spec [docsPath]: Generate baseline spec (requirements + AC)
 - design [docsPath]: Analyze requirements and create phase-based plan
-- prepare [docsPath]: Create spec + plan with defaults (vNext happy path)
-- flow [docsPath]: One-command path (prepare -> craft -> task auto)
+- prepare [docsPath]: Create research + spec + plan with defaults (vNext happy path)
+- refine-plan: Apply annotation notes to active plan
+- approve-plan: Mark plan reviewed/approved before implementation
+- flow [docsPath]: One-command path (prepare -> approve-plan gate -> craft -> task auto)
 - craft [phaseId]: Execute next phase automatically if omitted
 - status: View overall progress
 - worktree: Manage git worktrees for parallel work
@@ -50,14 +56,17 @@ Commands:
 - repair: Scan and auto-repair corrupted plan YAML files
 
 Examples:
+- weave research docs/
 - weave design docs/
+- weave refine-plan
+- weave approve-plan
 - weave craft P1
 - weave status
 - weave repair
 - weave troubleshoot "Cannot find module 'xyz'"`,
 
         args: {
-            command: z.enum(['spec', 'design', 'prepare', 'flow', 'craft', 'status', 'worktree', 'task', 'verify', 'troubleshoot', 'record', 'approve', 'help', 'repair'])
+            command: z.enum(['research', 'spec', 'design', 'prepare', 'refine-plan', 'approve-plan', 'flow', 'craft', 'status', 'worktree', 'task', 'verify', 'troubleshoot', 'record', 'approve', 'help', 'repair'])
                 .describe('Weave command to execute'),
             docsPath: z.string().optional()
                 .describe('Path to requirements documents (for design command)'),
@@ -67,6 +76,12 @@ Examples:
                 .describe('Project name (for design command)'),
             planName: z.string().optional()
                 .describe('Plan name (kebab-case) used for plan filename (optional)'),
+            planReview: z.string().optional()
+                .describe('Plan review summary text (for approve-plan command)'),
+            notesPath: z.string().optional()
+                .describe('Path to structured plan notes (default: tasks/plan-notes.md)'),
+            applyNotes: z.boolean().optional()
+                .describe('Auto-apply plan notes during approve-plan (default: true)'),
             worktreeAction: z.enum(['create', 'list', 'open', 'remove', 'merge']).optional()
                 .describe('Worktree action (for worktree command)'),
             name: z.string().optional()
@@ -109,11 +124,14 @@ Examples:
 
         execute: async (
             args: {
-                command: 'spec' | 'design' | 'prepare' | 'flow' | 'craft' | 'status' | 'worktree' | 'task' | 'verify' | 'troubleshoot' | 'record' | 'approve' | 'help' | 'repair';
+                command: 'research' | 'spec' | 'design' | 'prepare' | 'refine-plan' | 'approve-plan' | 'flow' | 'craft' | 'status' | 'worktree' | 'task' | 'verify' | 'troubleshoot' | 'record' | 'approve' | 'help' | 'repair';
                 docsPath?: string;
                 phaseId?: string;
                 projectName?: string;
                 planName?: string;
+                planReview?: string;
+                notesPath?: string;
+                applyNotes?: boolean;
                 worktreeAction?: 'create' | 'list' | 'open' | 'remove' | 'merge';
                 name?: string;
                 fromRef?: string;
@@ -141,6 +159,9 @@ Examples:
 
             try {
                 switch (command) {
+                    case 'research':
+                        return await handleResearch(args, basePath);
+
                     case 'spec':
                         return await handleSpec(args, basePath);
 
@@ -149,6 +170,12 @@ Examples:
 
                     case 'prepare':
                         return await handlePrepare(args, basePath);
+
+                    case 'refine-plan':
+                        return await handleRefinePlan(args, basePath);
+
+                    case 'approve-plan':
+                        return await handleApprovePlan(args, basePath);
 
                     case 'flow':
                         return await handleFlow(args, basePath);
@@ -198,6 +225,343 @@ Examples:
 // Command Handlers
 // ============================================================================
 
+function toWorkspaceRelative(basePath: string, filePath: string): string {
+    const rel = path.relative(basePath, filePath);
+    if (!rel || rel.startsWith('..')) return filePath;
+    return rel.replace(/\\/g, '/');
+}
+
+function getActivePlanArtifactPath(basePath: string, planName: string | undefined): string {
+    if (!planName) return '.opencode/weave/plans/<active>.yaml';
+    return toWorkspaceRelative(basePath, path.join(basePath, '.opencode', 'weave', 'plans', `${planName}.yaml`));
+}
+
+async function updateActivePlanReviewMetadata(
+    basePath: string,
+    metadata: {
+        researchPath?: string;
+        resetApproval?: boolean;
+        approvalNotes?: string | undefined;
+    }
+): Promise<void> {
+    const manager = getPhaseManager(basePath);
+    const activePlan = await manager.loadPlan();
+    if (!activePlan) return;
+
+    if (metadata.researchPath) {
+        activePlan.researchPath = toWorkspaceRelative(basePath, metadata.researchPath);
+        activePlan.researchUpdatedAt = new Date().toISOString();
+    }
+
+    if (metadata.resetApproval) {
+        activePlan.planApproved = false;
+        activePlan.planApprovedAt = undefined;
+        activePlan.planApprovalNotes = metadata.approvalNotes || 'Plan changed. Review and approve again.';
+    }
+
+    await manager.savePlan(activePlan);
+}
+
+function formatPlanApprovalRequired(
+    basePath: string,
+    plan: { planName?: string; researchPath?: string; planApproved?: boolean }
+): string {
+    const planPath = getActivePlanArtifactPath(basePath, plan.planName);
+    const researchPath = plan.researchPath || 'tasks/research.md';
+
+    return [
+        'Plan approval required before implementation.',
+        '',
+        `- Review research: \`${researchPath}\``,
+        `- Review plan: \`${planPath}\``,
+        '- (Optional) Apply note directives: `weave command=refine-plan`',
+        '- Then run: `weave command=approve-plan`',
+    ].join('\n');
+}
+
+const DEFAULT_PLAN_NOTES_PATH = path.join('tasks', 'plan-notes.md');
+
+type PlanRefinementOutcome = {
+    status: 'missing' | 'no_directives' | 'no_changes' | 'changed';
+    notesAbsolutePath: string;
+    notesRelativePath: string;
+    directivesParsed: number;
+    changes: string[];
+    warnings: string[];
+    updatedPlan?: WeavePlan;
+};
+
+function resolvePlanNotesPath(basePath: string, notesPath?: string): string {
+    const requested = notesPath?.trim() ? notesPath.trim() : DEFAULT_PLAN_NOTES_PATH;
+    if (path.isAbsolute(requested)) return requested;
+    return path.join(basePath, requested);
+}
+
+async function refinePlanByNotes(
+    basePath: string,
+    activePlan: WeavePlan,
+    notesPath?: string
+): Promise<PlanRefinementOutcome> {
+    const notesAbsolutePath = resolvePlanNotesPath(basePath, notesPath);
+    const notesRelativePath = toWorkspaceRelative(basePath, notesAbsolutePath);
+
+    try {
+        const content = await readFile(notesAbsolutePath, 'utf-8');
+        const result = refinePlanFromNotes(activePlan, content);
+
+        if (result.directivesParsed === 0) {
+            return {
+                status: 'no_directives',
+                notesAbsolutePath,
+                notesRelativePath,
+                directivesParsed: 0,
+                changes: [],
+                warnings: result.warnings,
+            };
+        }
+
+        if (!result.changed) {
+            return {
+                status: 'no_changes',
+                notesAbsolutePath,
+                notesRelativePath,
+                directivesParsed: result.directivesParsed,
+                changes: [],
+                warnings: result.warnings,
+                updatedPlan: result.updatedPlan,
+            };
+        }
+
+        return {
+            status: 'changed',
+            notesAbsolutePath,
+            notesRelativePath,
+            directivesParsed: result.directivesParsed,
+            changes: result.changes,
+            warnings: result.warnings,
+            updatedPlan: result.updatedPlan,
+        };
+    } catch {
+        return {
+            status: 'missing',
+            notesAbsolutePath,
+            notesRelativePath,
+            directivesParsed: 0,
+            changes: [],
+            warnings: [],
+        };
+    }
+}
+
+function formatRefinePlanGuide(notesRelativePath: string): string {
+    return [
+        'No plan-notes file found for refinement.',
+        '',
+        `- Create: \`${notesRelativePath}\``,
+        '- Add structured directives, for example:',
+        '```txt',
+        '@plan vision: 로그인 이후 대시보드 탐색 흐름을 단순화한다',
+        '@arch frontend: React + Vite + TanStack Query',
+        '@phase P1 done_when: 유저가 이메일/비밀번호로 로그인할 수 있다',
+        '@phase P1 add_task: 로그인 API 구현 | test=로그인 성공 시 200 반환 | retries=2',
+        '@phase P1 add_checklist: 로그인 실패 메시지가 명확히 표시된다',
+        '```',
+        '',
+        'Then run: `weave command=refine-plan`',
+    ].join('\n');
+}
+
+function formatRefinePlanResult(title: string, outcome: PlanRefinementOutcome): string {
+    const lines: string[] = [];
+    lines.push(title);
+    lines.push('');
+    lines.push(`- Notes: \`${outcome.notesRelativePath}\``);
+    lines.push(`- Parsed directives: ${outcome.directivesParsed}`);
+    lines.push(`- Applied changes: ${outcome.changes.length}`);
+
+    if (outcome.changes.length > 0) {
+        lines.push('');
+        lines.push('### Diff');
+        for (const change of outcome.changes.slice(0, 40)) {
+            lines.push(`- ${change}`);
+        }
+    }
+
+    if (outcome.warnings.length > 0) {
+        lines.push('');
+        lines.push('### Notes');
+        for (const warning of outcome.warnings.slice(0, 20)) {
+            lines.push(`- ${warning}`);
+        }
+    }
+
+    return lines.join('\n');
+}
+
+async function handleResearch(
+    args: { docsPath?: string; projectName?: string },
+    basePath: string
+): Promise<string> {
+    const { docsPath, projectName } = args;
+    if (!docsPath) {
+        return 'Error: docsPath is required for research command. Example: weave research docs/';
+    }
+
+    const resolvedDocsPath = resolveUnderBase(basePath, docsPath);
+    const intakeResult = await intake({ docsPath: resolvedDocsPath });
+    const researchResult = await writeResearchReport({
+        docsPath: resolvedDocsPath,
+        intake: intakeResult,
+        basePath,
+        projectName: projectName || 'My Project',
+    });
+
+    await updateActivePlanReviewMetadata(basePath, {
+        researchPath: researchResult.reportPath,
+        resetApproval: true,
+        approvalNotes: 'Research refreshed. Re-approve plan before implementation.',
+    });
+
+    return [
+        '## ✅ Weave Research 완료',
+        '',
+        researchResult.summary,
+        '',
+        '다음 단계:',
+        `- \`weave prepare ${docsPath}\` (권장)`,
+        `- 또는 \`weave design ${docsPath}\``,
+    ].join('\n');
+}
+
+async function handleRefinePlan(
+    args: { notesPath?: string },
+    basePath: string
+): Promise<string> {
+    const manager = getPhaseManager(basePath);
+    const activePlan = await manager.loadPlan();
+    if (!activePlan) {
+        return 'Error: No active plan found. Run `weave prepare docs/` or `weave design docs/` first.';
+    }
+
+    const outcome = await refinePlanByNotes(basePath, activePlan, args.notesPath);
+    if (outcome.status === 'missing') {
+        return formatRefinePlanGuide(outcome.notesRelativePath);
+    }
+
+    if (outcome.status === 'no_directives') {
+        return [
+            'No refine directives found in plan-notes.',
+            '',
+            `- Notes: \`${outcome.notesRelativePath}\``,
+            '- Add lines starting with `@phase`, `@plan`, or `@arch` and rerun.',
+        ].join('\n');
+    }
+
+    if (outcome.status === 'no_changes') {
+        return [
+            'Plan notes parsed, but no plan diff was produced.',
+            '',
+            `- Notes: \`${outcome.notesRelativePath}\``,
+            `- Parsed directives: ${outcome.directivesParsed}`,
+            '- Your directives may already be reflected in the active plan.',
+        ].join('\n');
+    }
+
+    const refinedPlan = outcome.updatedPlan;
+    if (!refinedPlan) {
+        return 'Error: plan refinement failed (no updated plan).';
+    }
+
+    refinedPlan.planApproved = false;
+    refinedPlan.planApprovedAt = undefined;
+    refinedPlan.planApprovalNotes = `Refined from notes (${outcome.notesRelativePath}). Review and approve again.`;
+    await manager.savePlan(refinedPlan);
+
+    await syncWorkflowArtifacts(basePath, manager, {
+        reviewLines: [
+            `Plan refined from notes: ${outcome.notesRelativePath}`,
+            `Applied changes: ${outcome.changes.length}`,
+        ],
+    });
+
+    return [
+        formatRefinePlanResult('## 📝 Plan Refined From Notes', outcome),
+        '',
+        'Review the updated plan, then run: `weave command=approve-plan`',
+    ].join('\n');
+}
+
+async function handleApprovePlan(
+    args: { planReview?: string; notesPath?: string; applyNotes?: boolean },
+    basePath: string
+): Promise<string> {
+    const manager = getPhaseManager(basePath);
+    const activePlan = await manager.loadPlan();
+    if (!activePlan) {
+        return 'Error: No active plan found. Run `weave prepare docs/` or `weave design docs/` first.';
+    }
+
+    const autoApplyNotes = args.applyNotes ?? true;
+    if (autoApplyNotes) {
+        const outcome = await refinePlanByNotes(basePath, activePlan, args.notesPath);
+        if (outcome.status === 'changed' && outcome.updatedPlan) {
+            const refinedPlan = outcome.updatedPlan;
+            refinedPlan.planApproved = false;
+            refinedPlan.planApprovedAt = undefined;
+            refinedPlan.planApprovalNotes = `Refined from notes (${outcome.notesRelativePath}). Review and approve again.`;
+            await manager.savePlan(refinedPlan);
+
+            await syncWorkflowArtifacts(basePath, manager, {
+                reviewLines: [
+                    `Approve-plan paused: refinement applied from ${outcome.notesRelativePath}.`,
+                    `Applied changes: ${outcome.changes.length}`,
+                ],
+            });
+
+            return [
+                formatRefinePlanResult('## 📝 Plan Refined During Approve', outcome),
+                '',
+                'Approval paused after applying note directives.',
+                'Review the updated plan and rerun: `weave command=approve-plan`',
+            ].join('\n');
+        }
+    }
+
+    let review = (args.planReview || '').trim();
+    if (!review) {
+        try {
+            const notePath = resolvePlanNotesPath(basePath, args.notesPath);
+            const noteBody = (await readFile(notePath, 'utf-8')).trim();
+            if (noteBody.length > 0) {
+                review = sanitizeLessonText(noteBody, 240);
+            }
+        } catch {
+            // Optional note file.
+        }
+    }
+
+    activePlan.planApproved = true;
+    activePlan.planApprovedAt = new Date().toISOString();
+    activePlan.planApprovalNotes = review || 'Approved without additional notes.';
+    await manager.savePlan(activePlan);
+
+    const nextPhase = activePlan.currentPhase
+        || activePlan.phases.find(phase => phase.status === 'in_progress')?.id
+        || activePlan.phases.find(phase => phase.status !== 'completed')?.id;
+
+    return [
+        '## ✅ Plan Approved',
+        '',
+        `- Plan: \`${getActivePlanArtifactPath(basePath, activePlan.planName)}\``,
+        `- Approved at: ${activePlan.planApprovedAt}`,
+        `- Review note: ${activePlan.planApprovalNotes}`,
+        '',
+        nextPhase
+            ? `다음 단계: \`weave command=craft phaseId="${nextPhase}"\``
+            : '다음 단계: `weave command=status`',
+    ].join('\n');
+}
+
 async function handleDesign(
     args: { docsPath?: string; projectName?: string; planName?: string },
     basePath: string
@@ -211,10 +575,18 @@ async function handleDesign(
     // Step 1: Intake
     const resolvedDocsPath = resolveUnderBase(basePath, docsPath);
     const intakeResult = await intake({ docsPath: resolvedDocsPath });
+    const researchResult = await writeResearchReport({
+        docsPath: resolvedDocsPath,
+        intake: intakeResult,
+        basePath,
+        projectName: projectName || 'My Project',
+    });
 
     // Check if there are questions
     if (intakeResult.questions.length > 0) {
         const lines: string[] = [];
+        lines.push(researchResult.summary);
+        lines.push('');
         lines.push('## 📄 문서 분석 완료\n');
         lines.push(`**발견한 기능**: ${intakeResult.features.slice(0, 5).join(', ')}`);
         lines.push(`**기술 스택**: ${JSON.stringify(intakeResult.technicalRequirements)}\n`);
@@ -246,7 +618,21 @@ async function handleDesign(
         basePath,
     });
 
-    return planResult.summary;
+    await updateActivePlanReviewMetadata(basePath, {
+        researchPath: researchResult.reportPath,
+        resetApproval: true,
+        approvalNotes: 'Plan created from design. Review and approve before implementation.',
+    });
+
+    return [
+        researchResult.summary,
+        '',
+        planResult.summary,
+        '',
+        '---',
+        '계획을 검토하고 구현 전에 승인하세요:',
+        '- `weave command=approve-plan`',
+    ].join('\n');
 }
 
 async function handleSpec(
@@ -292,6 +678,12 @@ async function handlePrepare(
 
     const resolvedDocsPath = resolveUnderBase(basePath, docsPath);
     const intakeResult = await intake({ docsPath: resolvedDocsPath });
+    const researchResult = await writeResearchReport({
+        docsPath: resolvedDocsPath,
+        intake: intakeResult,
+        basePath,
+        projectName: projectName || 'My Project',
+    });
 
     const normalizedPlanName = normalizePlanName(args.planName, projectName, resolvedDocsPath);
 
@@ -311,8 +703,16 @@ async function handlePrepare(
         basePath,
     });
 
+    await updateActivePlanReviewMetadata(basePath, {
+        researchPath: researchResult.reportPath,
+        resetApproval: true,
+        approvalNotes: 'Plan created from prepare. Review and approve before implementation.',
+    });
+
     const lines: string[] = [];
     lines.push('## ✅ Weave Prepare 완료\n');
+    lines.push(researchResult.summary);
+    lines.push('');
     lines.push(specResult.summary);
     lines.push('');
     lines.push(planResult.summary);
@@ -326,8 +726,9 @@ async function handlePrepare(
     }
 
     lines.push('\n---\n');
-    lines.push('다음 단계:');
-    lines.push('`weave craft P1`');
+    lines.push('다음 단계 (구현 전 승인 필수):');
+    lines.push('`weave command=approve-plan`');
+    lines.push('그 다음 `weave craft P1` 또는 `weave flow`');
 
     return lines.join('\n');
 }
@@ -440,6 +841,26 @@ async function handleFlow(
         return lines.join('\n');
     }
 
+    lines.push('');
+    lines.push('### Plan Approval');
+    lines.push('');
+
+    if (!plan.planApproved) {
+        const approvalMessage = formatPlanApprovalRequired(basePath, plan);
+        lines.push(approvalMessage);
+
+        await syncWorkflowArtifacts(basePath, manager, {
+            phaseId: resolvedPhaseId,
+            reviewLines: [
+                `Flow paused before implementation: plan approval required for ${resolvedPhaseId}.`,
+            ],
+        });
+
+        return lines.join('\n');
+    }
+
+    lines.push('- PASS: plan approved for implementation');
+
     const craftResult = await handleCraft({
         phaseId: resolvedPhaseId,
         projectType: args.projectType,
@@ -544,6 +965,15 @@ async function handleCraft(
     let resolvedPhaseId = phaseId;
     let autoSelectedPhase = false;
     let recoveryPrefix = '';
+
+    const planManager = getPhaseManager(basePath);
+    const activePlan = await planManager.loadPlan();
+    if (!activePlan) {
+        return 'Error: No active plan. Run `weave design docs/` (or `weave prepare docs/`) first.';
+    }
+    if (!activePlan.planApproved) {
+        return formatPlanApprovalRequired(basePath, activePlan);
+    }
 
     // If a taskAction is provided, treat craft as a shorthand for the task loop.
     // This lets users stick to a single mental model: "craft" for phase work.
@@ -735,7 +1165,7 @@ function findNextActionableTask(phase: any): any | null {
 
 async function handleStatus(basePath: string): Promise<string> {
     const manager = getPhaseManager(basePath);
-    await manager.loadPlan();
+    const activePlan = await manager.loadPlan();
     
     const report = await generateStatusReport(basePath);
 
@@ -760,6 +1190,18 @@ async function handleStatus(basePath: string): Promise<string> {
     }
     
     lines.push(report, '');
+    if (activePlan) {
+        lines.push('### Plan Approval');
+        lines.push(`- Approved: ${activePlan.planApproved ? 'yes' : 'no'}`);
+        if (activePlan.planApprovedAt) {
+            lines.push(`- Approved at: ${activePlan.planApprovedAt}`);
+        }
+        if (activePlan.researchPath) {
+            lines.push(`- Research: \`${activePlan.researchPath}\``);
+        }
+        lines.push('');
+    }
+
     lines.push('### Global Knowledge Base');
     lines.push(`- Total troubleshooting records: ${stats.totalEntries}`);
     if (stats.topProjectTypes.length > 0) {
@@ -921,6 +1363,10 @@ async function handleTask(
     }
 
     const action = args.taskAction || 'list';
+
+    if (['start', 'pass', 'retry', 'auto'].includes(action) && !plan.planApproved) {
+        return formatPlanApprovalRequired(basePath, plan);
+    }
 
     const currentPhase = () => manager.getPhase(phaseId) || phase;
 
@@ -1691,20 +2137,23 @@ To check installed version:
 
   | Command | Description |
   |---------|-------------|
+  | \`weave research [docs]\` | Deep-read docs and write persistent research.md |
   | \`weave spec [docs]\` | Generate baseline spec (requirements + AC) |
   | \`weave prepare [docs]\` | Create spec + phase plan (vNext happy path) |
-  | \`weave flow [docs]\` | One-command path (prepare -> craft -> task auto) |
- | \`weave design [docs]\` | Analyze requirements and create phase plan |
+  | \`weave refine-plan\` | Apply structured plan-note directives to active plan |
+  | \`weave approve-plan\` | Mark plan approved before implementation |
+  | \`weave flow [docs]\` | One-command path (prepare -> approve-plan gate -> craft -> task auto) |
+  | \`weave design [docs]\` | Analyze requirements and create phase plan |
   | \`weave craft [id]\` | Execute a phase (auto-select next if omitted) |
   | \`weave status\` | View progress |
   | \`weave worktree ...\` | Manage git worktrees for parallel work |
- | \`weave task ...\` | Task loop (start/fail/retry/pass/auto) |
+  | \`weave task ...\` | Task loop (start/fail/retry/pass/auto) |
   | \`weave verify\` | Run build/test verification for current worktree |
   | \`weave approve [id]\` | Mark phase complete (auto phase + verification) |
- | \`weave repair\` | Scan and auto-repair corrupted plan YAML files |
- | \`weave troubleshoot [error]\` | Search global knowledge for solutions |
- | \`weave record [solution]\` | Record a new solution |
- | \`weave help\` | Show this help |
+  | \`weave repair\` | Scan and auto-repair corrupted plan YAML files |
+  | \`weave troubleshoot [error]\` | Search global knowledge for solutions |
+  | \`weave record [solution]\` | Record a new solution |
+  | \`weave help\` | Show this help |
 
 ### Key Features
 
@@ -1716,7 +2165,9 @@ To check installed version:
 ### Quick Start
 
 \`\`\`
-weave flow docs/                                         # One-command path
+weave prepare docs/                                      # Research + spec + plan
+weave refine-plan                                        # Apply plan-notes directives (optional)
+weave approve-plan                                       # Explicit approval gate
 weave flow                                               # Continue active plan/task
 weave flow autoApprove=true                              # Auto-run full verify + approve when tasks finish
 weave approve                                            # Auto-select current phase + full verify

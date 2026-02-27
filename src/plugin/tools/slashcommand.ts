@@ -70,8 +70,13 @@ Maskweaver의 Phase-Driven Development 워크플로우입니다.
 
 | 명령어 | 설명 |
 |--------|------|
+| \`weave research [docs]\` | 문서 깊이 분석 + research 아티팩트 생성 |
+| \`weave prepare [docs]\` | research + spec + plan 생성 |
+| \`weave refine-plan\` | plan-notes를 active plan에 자동 반영 |
+| \`weave approve-plan\` | 구현 전 계획 승인 게이트 통과 |
 | \`weave design [docs]\` | 요구사항 분석 → Phase 계획 |
 | \`weave craft [id]\` | Phase 실행 (자동 검증) |
+| \`weave flow [docs]\` | prepare -> approve-plan gate -> craft -> task auto |
 | \`weave status\` | 진행 상황 확인 |
 | \`weave help\` | 이 도움말 |
 
@@ -89,6 +94,50 @@ Maskweaver의 Phase-Driven Development 워크플로우입니다.
 
 Example: weave command=design docsPath="docs/"`,
     },
+    'weave-research': {
+        metadata: {
+            name: 'weave-research',
+            description: '문서를 깊게 읽고 research 아티팩트 생성',
+            usage: '/weave research [docsPath]',
+            examples: ['/weave research docs/', '/weave research wiki/spec.md'],
+        },
+        content: `Use the weave tool with command=research and specify docsPath.
+
+Example: weave command=research docsPath="docs/"`,
+    },
+    'weave-prepare': {
+        metadata: {
+            name: 'weave-prepare',
+            description: 'research + spec + plan 생성',
+            usage: '/weave prepare [docsPath]',
+            examples: ['/weave prepare docs/'],
+        },
+        content: `Use the weave tool with command=prepare and specify docsPath.
+
+Example: weave command=prepare docsPath="docs/"`,
+    },
+    'weave-refine-plan': {
+        metadata: {
+            name: 'weave-refine-plan',
+            description: 'plan-notes를 active plan에 자동 반영',
+            usage: '/weave refine-plan',
+            examples: ['/weave refine-plan'],
+        },
+        content: `Use the weave tool with command=refine-plan.
+
+Example: weave command=refine-plan`,
+    },
+    'weave-approve-plan': {
+        metadata: {
+            name: 'weave-approve-plan',
+            description: '구현 전 계획 승인 게이트 통과',
+            usage: '/weave approve-plan',
+            examples: ['/weave approve-plan'],
+        },
+        content: `Use the weave tool with command=approve-plan.
+
+Example: weave command=approve-plan`,
+    },
     'weave-craft': {
         metadata: {
             name: 'weave-craft',
@@ -103,7 +152,7 @@ Example: weave command=craft phaseId="P1"`,
     'weave-flow': {
         metadata: {
             name: 'weave-flow',
-            description: '원커맨드 실행 (prepare -> craft -> task auto)',
+            description: '원커맨드 실행 (prepare -> approve-plan gate -> craft -> task auto)',
             usage: '/weave flow [docsPath]',
             examples: ['/weave flow docs/', '/weave flow'],
         },
@@ -113,7 +162,10 @@ With docs path:
 weave command=flow docsPath="docs/"
 
 Continue active plan:
-weave command=flow`,
+weave command=flow
+
+Note: If plan is not approved yet, flow pauses and asks for:
+weave command=approve-plan`,
     },
     'weave-status': {
         metadata: {
@@ -256,8 +308,12 @@ export function createSlashcommandTool() {
     return {
         description: `Execute a slash command. Available commands include:
 - /weave help - Weave workflow help
+- /weave research [docs] - Deep-read docs and write research artifact
 - /weave design [docs] - Analyze requirements and create plan
-- /weave flow [docs] - One-command path (prepare -> craft -> task auto)
+- /weave prepare [docs] - Create research + spec + plan
+- /weave refine-plan - Apply plan-note directives to active plan
+- /weave approve-plan - Approve plan before implementation
+- /weave flow [docs] - One-command path (prepare -> approve-plan gate -> craft -> task auto)
 - /weave craft [phaseId] - Execute a phase
 - /weave status - View progress
 - /weave repair - Scan and auto-repair corrupted plan YAML files
@@ -304,7 +360,7 @@ Use command="list" to see all available commands.`,
                 if (helpCmd) {
                     return helpCmd.content || 'Weave help content not available.';
                 }
-            } else if (['status', 'design', 'flow', 'craft', 'help', 'repair'].includes(cmdName)) {
+            } else if (['status', 'design', 'prepare', 'refine-plan', 'flow', 'craft', 'research', 'approve-plan', 'help', 'repair'].includes(cmdName)) {
                 // Shorthand: "status" -> "weave-status"
                 const weaveCmd = commands.find(c => c.name === `weave-${cmdName}`);
                 if (weaveCmd) {

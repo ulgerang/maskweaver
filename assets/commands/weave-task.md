@@ -14,6 +14,9 @@ Weave phase의 task 상태를 업데이트합니다.
 
 이 커맨드는 `weave craft`가 만든 실행 계획을 "실제로 굴리는" 루프용입니다.
 
+> 참고: active plan이 승인되지 않았다면(`weave approve-plan` 미실행)
+> `start/pass/retry/auto` 액션은 차단됩니다.
+
 ---
 
 ## 기본 사용 패턴

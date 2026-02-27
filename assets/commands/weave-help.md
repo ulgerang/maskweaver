@@ -42,9 +42,12 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 | 명령어 | 설명 |
 |--------|------|
 | `/weave-init` | Weave 초기화 (프로젝트당 1회) |
+| `/weave-research [docs]` | 문서를 깊게 읽고 `tasks/research.md` 생성 |
 | `/weave-spec [docs]` | 요구사항 정제 + 검증 기준(AC) 추출 (선택) |
-| `/weave-prepare [docs]` | **spec + plan을 한 번에 생성** (vNext 기본 경로) |
-| `/weave-flow [docs]` | **원커맨드** prepare → craft → task auto 실행 |
+| `/weave-prepare [docs]` | **research + spec + plan을 한 번에 생성** (vNext 기본 경로) |
+| `/weave-refine-plan` | `tasks/plan-notes.md` 지시문을 plan에 자동 반영 |
+| `/weave-approve-plan` | 구현 전 계획 승인 게이트 통과 |
+| `/weave-flow [docs]` | **원커맨드** prepare → approve-plan gate → craft → task auto |
 | `/weave-design [docs]` | 요구사항 분석 → Phase 계획 (새 플랜 생성) |
 | `/weave-plan [docs]` | `/weave-design` 별칭 (호환용) |
 | `/weave-craft [phase-id]` | 활성 플랜의 Phase 실행 (id 생략 시 다음 Phase 자동 선택) |
@@ -64,9 +67,13 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 ```
 /weave-init                    ← 프로젝트 초기화 (1회)
     ↓
-/weave-flow docs/              ← (원커맨드) prepare→craft→task auto
+/weave-flow docs/              ← (원커맨드) prepare→approve-plan gate→craft→task auto
     ↓
-/weave-prepare docs/           ← (수동 경로) spec+plan 한 번에 생성
+/weave-prepare docs/           ← (수동 경로) research+spec+plan 한 번에 생성
+    ↓
+/weave-refine-plan             ← (선택) plan-notes 기반 자동 정제
+    ↓
+/weave-approve-plan            ← 구현 전 계획 승인 (필수)
     ↓
 /weave-craft                   ← 다음 Phase 자동 선택 실행
 /weave-task-auto               ← 현재 task 반자동 루프
@@ -140,8 +147,9 @@ Phase 실행 시 자동 검증:
 # 2. (추천) spec + plan을 한 번에 생성
 /weave-prepare wiki/
 
-# 3. 피드백 → 승인
-"좋아, 진행해"
+# 3. 계획 검토 후 승인 게이트 통과
+/weave-refine-plan   # (선택) notes 반영
+/weave-approve-plan
 
 # 4. 다음 Phase 자동 선택 실행
 /weave-craft

@@ -37,6 +37,8 @@ export {
 
 // Core workflow stages
 export { intake } from './stages/intake.js';
+export { buildResearchReport, writeResearchReport } from './stages/research.js';
+export { refinePlanFromNotes } from './stages/refine.js';
 export { spec } from './stages/spec.js';
 export { plan } from './stages/plan.js';
 export { execute } from './stages/execute.js';

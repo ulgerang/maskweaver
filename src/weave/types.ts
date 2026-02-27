@@ -86,6 +86,15 @@ export interface WeavePlan {
         database?: string;
         notes?: string;
     };
+    /** Optional research artifact path generated before planning. */
+    researchPath?: string;
+    researchUpdatedAt?: string;
+
+    /** Plan approval gate metadata (required before implementation). */
+    planApproved?: boolean;
+    planApprovedAt?: string;
+    planApprovalNotes?: string;
+
     phases: WeavePhase[];
     currentPhase?: string;
 }

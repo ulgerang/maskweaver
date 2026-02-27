@@ -79,6 +79,31 @@ function serializePlan(plan: WeavePlan): string {
     if (plan.architecture.notes) lines.push(`  notes: ${yamlEscapeString(plan.architecture.notes)}`);
     lines.push('');
 
+    if (plan.researchPath) {
+        lines.push(`research_path: ${yamlEscapeString(plan.researchPath)}`);
+    }
+    if (plan.researchUpdatedAt) {
+        lines.push(`research_updated_at: ${yamlEscapeString(plan.researchUpdatedAt)}`);
+    }
+    if (typeof plan.planApproved === 'boolean') {
+        lines.push(`plan_approved: ${plan.planApproved ? 'true' : 'false'}`);
+    }
+    if (plan.planApprovedAt) {
+        lines.push(`plan_approved_at: ${yamlEscapeString(plan.planApprovedAt)}`);
+    }
+    if (plan.planApprovalNotes) {
+        lines.push(`plan_approval_notes: ${yamlEscapeString(plan.planApprovalNotes)}`);
+    }
+    if (
+        plan.researchPath
+        || plan.researchUpdatedAt
+        || typeof plan.planApproved === 'boolean'
+        || plan.planApprovedAt
+        || plan.planApprovalNotes
+    ) {
+        lines.push('');
+    }
+
     if (plan.currentPhase) {
         lines.push(`current_phase: ${yamlEscapeString(plan.currentPhase)}`);
         lines.push('');
@@ -264,9 +289,21 @@ export class PhaseManager {
         const planFilePath = path.join(getPlansDir(this.basePath), `${planName}.yaml`);
         safeWriteFile(planFilePath, content);
 
-        // Update state.yaml with active_plan
+        // Update state.yaml with active_plan while preserving additional keys.
+        // This avoids clobbering forward-compatible state fields.
         const { stringify } = await import('yaml');
-        const stateContent = stringify({ active_plan: planName });
+        let stateData: Record<string, any> = {};
+        try {
+            const stateResult = await safeReadYaml(statePath);
+            if (stateResult.data && typeof stateResult.data === 'object') {
+                stateData = { ...stateResult.data };
+            }
+        } catch {
+            // ignore state parse errors and overwrite with minimal state
+        }
+
+        stateData.active_plan = planName;
+        const stateContent = stringify(stateData);
         safeWriteFile(statePath, stateContent);
 
         this.plan = plan;
@@ -298,6 +335,7 @@ export class PhaseManager {
             updatedAt: now,
             vision: input.vision,
             architecture: input.architecture,
+            planApproved: false,
             phases: input.phases.map(p => ({
                 ...p,
                 tasks: [],
@@ -587,6 +625,13 @@ export class PhaseManager {
             updatedAt: raw.updated_at || raw.updatedAt || new Date().toISOString(),
             vision: raw.vision || '',
             architecture: raw.architecture || {},
+            researchPath: raw.research_path || raw.researchPath,
+            researchUpdatedAt: raw.research_updated_at || raw.researchUpdatedAt,
+            planApproved: typeof raw.plan_approved === 'boolean'
+                ? raw.plan_approved
+                : (typeof raw.planApproved === 'boolean' ? raw.planApproved : undefined),
+            planApprovedAt: raw.plan_approved_at || raw.planApprovedAt,
+            planApprovalNotes: raw.plan_approval_notes || raw.planApprovalNotes,
             currentPhase: raw.current_phase || raw.currentPhase,
             phases: (raw.phases || []).map((p: any) => ({
                 id: p.id,

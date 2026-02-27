@@ -48,22 +48,43 @@ describe('Weave Flow Command', () => {
     cleanupTempDir(tempDir);
   });
 
-  test('flow with docs runs prepare -> craft -> task auto', async () => {
+  test('flow with docs pauses at approval gate, then runs after approve-plan', async () => {
     const tool = createWeaveTool();
-    const output = await tool.execute(
+    const firstOutput = await tool.execute(
       { command: 'flow', docsPath: 'docs' },
       { worktree: tempDir },
     );
 
-    expect(output).toContain('## ▶ Weave Flow');
-    expect(output).toContain('### 1) Prepare');
-    expect(output).toContain('### Plan Gate');
-    expect(output).toContain('### 2) Craft');
-    expect(output).toContain('### 3) Task Auto');
+    expect(firstOutput).toContain('## ▶ Weave Flow');
+    expect(firstOutput).toContain('### 1) Prepare');
+    expect(firstOutput).toContain('### Plan Gate');
+    expect(firstOutput).toContain('### Plan Approval');
+    expect(firstOutput).toContain('Plan approval required before implementation.');
+    expect(existsSync(join(tempDir, 'tasks', 'research.md'))).toBe(true);
 
     const manager = getPhaseManager(tempDir);
     const plan = await manager.loadPlan();
     expect(plan).not.toBeNull();
+    expect(plan?.planApproved).toBe(false);
+    expect(plan?.researchPath).toBe('tasks/research.md');
+
+    const p1Before = manager.getPhase('P1');
+    expect(p1Before).not.toBeNull();
+    expect(p1Before?.status).toBe('pending');
+
+    const approveOutput = await tool.execute(
+      { command: 'approve-plan' },
+      { worktree: tempDir },
+    );
+    expect(approveOutput).toContain('## ✅ Plan Approved');
+
+    const output = await tool.execute(
+      { command: 'flow' },
+      { worktree: tempDir },
+    );
+
+    expect(output).toContain('### 2) Craft');
+    expect(output).toContain('### 3) Task Auto');
 
     const p1 = manager.getPhase('P1');
     expect(p1).not.toBeNull();
@@ -73,11 +94,113 @@ describe('Weave Flow Command', () => {
     expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
   }, 20000);
 
+  test('research command writes persistent artifact', async () => {
+    const tool = createWeaveTool();
+
+    const output = await tool.execute(
+      { command: 'research', docsPath: 'docs' },
+      { worktree: tempDir },
+    );
+
+    expect(output).toContain('## ✅ Weave Research 완료');
+    expect(output).toContain('Artifact: `tasks/research.md`');
+    expect(existsSync(join(tempDir, 'tasks', 'research.md'))).toBe(true);
+  }, 20000);
+
+  test('refine-plan applies plan-notes directives and resets approval', async () => {
+    const tool = createWeaveTool();
+
+    await tool.execute(
+      { command: 'flow', docsPath: 'docs' },
+      { worktree: tempDir },
+    );
+
+    const notesDir = join(tempDir, 'tasks');
+    mkdirSync(notesDir, { recursive: true });
+    writeFileSync(
+      join(notesDir, 'plan-notes.md'),
+      [
+        '@phase P1 done_when: 유저가 이메일/비밀번호로 로그인할 수 있다',
+        '@phase P1 add_task: 로그인 API 구현 | test=로그인 성공 시 200 반환 | retries=2',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const output = await tool.execute(
+      { command: 'refine-plan' },
+      { worktree: tempDir },
+    );
+
+    expect(output).toContain('## 📝 Plan Refined From Notes');
+    expect(output).toContain('Applied changes:');
+
+    const manager = getPhaseManager(tempDir);
+    const plan = await manager.loadPlan();
+    expect(plan).not.toBeNull();
+    expect(plan?.planApproved).toBe(false);
+
+    const p1 = manager.getPhase('P1');
+    expect(p1).not.toBeNull();
+    expect(p1?.doneWhen).toContain('이메일/비밀번호');
+    expect(p1?.tasks.some(t => t.name.includes('로그인 API 구현'))).toBe(true);
+  }, 20000);
+
+  test('approve-plan auto-applies notes and requires re-run for final approval', async () => {
+    const tool = createWeaveTool();
+
+    await tool.execute(
+      { command: 'flow', docsPath: 'docs' },
+      { worktree: tempDir },
+    );
+
+    const notesDir = join(tempDir, 'tasks');
+    mkdirSync(notesDir, { recursive: true });
+    writeFileSync(
+      join(notesDir, 'plan-notes.md'),
+      '@phase P1 add_checklist: 로그인 실패 메시지가 명확히 보인다\n',
+      'utf-8',
+    );
+
+    const firstApprove = await tool.execute(
+      { command: 'approve-plan' },
+      { worktree: tempDir },
+    );
+
+    expect(firstApprove).toContain('## 📝 Plan Refined During Approve');
+    expect(firstApprove).toContain('Approval paused after applying note directives.');
+
+    const manager = getPhaseManager(tempDir);
+    const midPlan = await manager.loadPlan();
+    expect(midPlan).not.toBeNull();
+    expect(midPlan?.planApproved).toBe(false);
+
+    const secondApprove = await tool.execute(
+      { command: 'approve-plan' },
+      { worktree: tempDir },
+    );
+
+    expect(secondApprove).toContain('## ✅ Plan Approved');
+
+    const finalPlan = await manager.loadPlan();
+    expect(finalPlan).not.toBeNull();
+    expect(finalPlan?.planApproved).toBe(true);
+  }, 20000);
+
   test('flow without docs reuses active plan and keeps waiting when no implementation delta', async () => {
     const tool = createWeaveTool();
 
     await tool.execute(
       { command: 'flow', docsPath: 'docs' },
+      { worktree: tempDir },
+    );
+
+    await tool.execute(
+      { command: 'approve-plan' },
+      { worktree: tempDir },
+    );
+
+    await tool.execute(
+      { command: 'flow' },
       { worktree: tempDir },
     );
 
@@ -99,11 +222,38 @@ describe('Weave Flow Command', () => {
     expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
   }, 20000);
 
+  test('task auto is blocked until plan approval', async () => {
+    const tool = createWeaveTool();
+
+    await tool.execute(
+      { command: 'flow', docsPath: 'docs' },
+      { worktree: tempDir },
+    );
+
+    const output = await tool.execute(
+      { command: 'task', phaseId: 'P1', taskAction: 'auto' },
+      { worktree: tempDir },
+    );
+
+    expect(output).toContain('Plan approval required before implementation.');
+    expect(output).toContain('weave command=approve-plan');
+  }, 20000);
+
   test('task auto creates replanned subtasks after repeated failures', async () => {
     const tool = createWeaveTool();
 
     await tool.execute(
       { command: 'flow', docsPath: 'docs' },
+      { worktree: tempDir },
+    );
+
+    await tool.execute(
+      { command: 'approve-plan' },
+      { worktree: tempDir },
+    );
+
+    await tool.execute(
+      { command: 'flow' },
       { worktree: tempDir },
     );
 

@@ -847,26 +847,37 @@ Only AFTER completing all configuration, tell the user:
 
 ---
 
-## Weave Workflow (New!)
+## Weave Workflow (v0.8+)
 
-After installation, try the **Weave workflow** - a phase-driven development system with AI self-verification:
+After installation, try the **Weave v0.8 workflow** with research-first planning and approval gates:
 
 ```bash
-# 1. Analyze requirements and create a phase plan
-/weave design docs/
+# 1. Deep-read docs and create research artifact
+/weave research docs/
 
-# 2. Execute a phase with auto-verification
+# 2. Generate research + spec + plan
+/weave prepare docs/
+
+# 3. (Optional) Apply annotation notes to refine plan
+/weave refine-plan
+
+# 4. (Required) Approve plan before implementation
+/weave approve-plan
+
+# 5. Execute phase with auto-verification
 /weave craft P1
 
-# 3. Check progress anytime
+# 6. Check progress anytime
 /weave status
 ```
 
-**Features:**
-- 🎭 **Auto Mask Selection**: AI picks the best expert for each task
-- ✅ **Multi-Layer Verification**: Build → Test → E2E → Visual → A11y
-- 🧠 **Global Knowledge**: Cross-project troubleshooting solutions (RAG)
-- 📊 **Progress Tracking**: Real-time phase and task status
+**New in v0.8:**
+- 📝 **Research-first**: Deep document analysis before planning
+- 🔒 **Approval gate**: Plan must be approved before implementation
+- ✏️ **Annotation cycle**: `tasks/plan-notes.md` directives for plan refinement
+- 🎭 **Auto mask selection**: AI picks best expert for each task
+- ✅ **Multi-layer verification**: Build → Test → E2E → Visual → A11y
+- 🧠 **Global knowledge**: Cross-project troubleshooting solutions
 
 See the [README](../README.md#-weave-workflow) for full documentation.
 

@@ -12,7 +12,7 @@ description: 구현 전 계획 승인 게이트 통과
 - 기본적으로 `tasks/plan-notes.md` 지시문을 먼저 자동 반영(refine) 시도
   - 변경이 반영되면 승인 단계는 일시 중단되고, 검토 후 다시 approve 실행
 - 필요 시 plan 메모를 승인 코멘트로 함께 기록
-- 승인 전에는 `weave craft`/`weave flow`/`weave task auto`가 차단됩니다
+- 승인 전에는 `weave craft`/`weave flow` 실행이 차단됩니다
 
 ---
 

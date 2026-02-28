@@ -176,12 +176,10 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
 | `/weave prepare [docs]` | (수동 경로) research + baseline spec + phase plan 생성 |
 | `/weave refine-plan` | `tasks/plan-notes.md` 지시문을 active plan에 반영 |
 | `/weave approve-plan` | 구현 전 사람이 계획 승인(게이트) |
-| `/weave flow [docs]` | (권장) 원커맨드 경로: prepare -> approve-plan gate -> craft -> task auto |
+| `/weave flow [docs]` | (권장) 원커맨드 경로: prepare -> approve-plan gate -> craft auto-loop |
 | `/weave spec [docs]` | baseline spec만 생성 (선택) |
 | `/weave design [docs]` | 요구사항 분석 → Phase 계획 생성 (`/weave plan`은 별칭/호환) |
-| `/weave craft [P#]` | Phase 실행 계획 생성/실행 (phase 생략 시 자동 선택) |
-| `/weave task ...` | Task 루프 (start/fail/retry/pass/auto) + 옵션 검증/커밋 |
-| `/weave-task-auto [P#|P#-T#]` | 인자 최소화 자동 루프 (기본 quick verify) |
+| `/weave craft [P#]` | Phase 실행 계획 생성/실행 + 자동 task loop (phase 생략 시 자동 선택) |
 | `/weave verify` | 빌드/테스트 검증 실행 (자동 감지) |
 | `/weave approve [P#]` | (기본)검증 후 Phase 완료 처리 (phase 생략 시 자동 선택) |
 | `/weave worktree ...` | git worktree 기반 병렬 작업 관리 |
@@ -196,7 +194,7 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
 0. INIT (1회): /weave init
        ↓
 1. 원커맨드(권장): /weave flow docs/
-    - 실행: prepare -> approve-plan gate -> craft -> task auto
+    - 실행: prepare -> approve-plan gate -> craft auto-loop
        ↓
    (또는 수동 경로)
        ↓
@@ -207,19 +205,16 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
     - tasks/plan-notes.md 기반 계획 정제
        ↓
 4. APPROVAL GATE: /weave approve-plan
-    - craft/task 실행 전 필수 승인
+    - craft 실행 전 필수 승인
        ↓
 5. CRAFT: /weave craft
-    - Phase 실행 계획(execution plan) 생성 (tasks + 추천 마스크/에이전트 티어)
+    - Phase 실행 계획 생성 + 자동 task loop 실행
+    - PASS/FAIL/재시도/re-plan은 craft 루프에서 처리
        ↓
-6. TASK LOOP: /weave task ... (또는 /weave-task-auto)
-    - PASS → 옵션: quick verify + 원자 커밋
-    - FAIL → 에러 기록 → 글로벌 지식 검색 → 재시도 (최대 5회)
-       ↓
-7. APPROVE: /weave approve
+6. APPROVE: /weave approve
     - (기본) verify 실행 후 Phase를 completed로 변경
        ↓
-8. HANDOFF: 유저가 UX/의도 확인 후 다음 Phase로 진행
+7. HANDOFF: 유저가 UX/의도 확인 후 다음 Phase로 진행
 ```
 
 #### 다층 AI 검증 시스템
@@ -368,7 +363,7 @@ import { WeaveOrchestrator, GlobalKnowledge } from 'maskweaver/weave';
 /weave flow docs/
 ```
 
-한 번에 `prepare -> approve-plan gate -> craft -> task auto`까지 실행합니다.
+한 번에 `prepare -> approve-plan gate -> craft auto-loop`까지 실행합니다.
 
 수동 happy path (research + spec + plan 한 번에):
 
@@ -423,25 +418,16 @@ AI 인사이트가 포함된 현대적 감정 일기 앱 구축
 /weave craft
 ```
 
-`/weave craft`는 Phase를 실행하기 위한 실행 계획을 생성/표시합니다(phase 미지정 시 다음 phase 자동 선택). 이후 실제 진행/상태 업데이트는 `weave command=task ...` 루프로 굴립니다.
+`/weave craft`는 실행 계획을 생성한 뒤 자동 task loop를 즉시 실행합니다(phase 미지정 시 다음 phase 자동 선택). 구현 반영 후 같은 명령을 다시 실행하면 이어서 진행됩니다.
 
-### 4단계: Task 루프
-
-```txt
-weave command=task phaseId="P1" taskAction=list
-weave command=task phaseId="P1" taskAction=next
-weave command=task phaseId="P1" taskAction=start taskId="P1-T1"
-weave command=task phaseId="P1" taskAction=pass taskId="P1-T1" verify=true verifyMode="quick"
-weave command=task phaseId="P1" taskAction=fail taskId="P1-T1" taskError="<error message>"
-```
-
-입력을 줄이고 자동으로 굴리려면:
+### 4단계: Craft 루프 이어서 진행
 
 ```txt
-weave command=task phaseId="P1" taskAction=auto verify=true verifyMode="quick"
+weave command=craft phaseId="P1"
+weave command=craft phaseId="P1" taskId="P1-T1"
 ```
 
-같은 흐름을 원커맨드로 이어서 실행하려면:
+원커맨드로 계속 이어서 진행하려면:
 
 ```txt
 weave command=flow

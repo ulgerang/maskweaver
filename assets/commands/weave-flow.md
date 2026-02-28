@@ -1,5 +1,5 @@
 ---
-description: 원커맨드 실행 (prepare -> approve-plan gate -> craft -> task auto)
+description: 원커맨드 실행 (prepare -> approve-plan gate -> craft auto-loop)
 ---
 
 # /weave-flow - 원커맨드 실행
@@ -12,9 +12,8 @@ description: 원커맨드 실행 (prepare -> approve-plan gate -> craft -> task 
 - `refine-plan` (선택): `tasks/plan-notes.md` 지시문 반영
 - `plan gate`: 실행 전 계획 품질 점검 (task 분해/테스트/검증 커버리지)
 - `approval gate`: `approve-plan` 전에는 구현 단계로 내려가지 않음
-- `craft`: 실행 대상 phase 준비
-- `task auto`: 현재 task 자동 루프 진입
-- `task auto` 내 반복 실패 시 re-plan 서브태스크 자동 생성
+- `craft`: 실행 대상 phase 준비 + 자동 task 루프 실행
+- `craft auto-loop` 내 반복 실패 시 re-plan 서브태스크 자동 생성
 - (옵션) `approve`: 모든 task가 끝나면 full verify + phase approve
 
 > 목표: 유저가 명령을 여러 번 기억하지 않고, 한 번의 호출로 실행 흐름에 진입하되,

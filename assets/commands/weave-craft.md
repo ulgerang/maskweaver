@@ -13,7 +13,7 @@ AI가 자동으로 검증 루프를 돌리고, 완료되면 유저에게 전달�
 - `$ARGUMENTS` = 선택적 Phase ID (예: `P1`, `P2`)
 - 비우면 다음 실행 가능한 Phase를 자동 선택합니다.
 
-> prepare부터 task auto까지 한 번에 실행하려면 `/weave-flow [docs]`를 사용하세요.
+> prepare부터 craft auto-loop까지 한 번에 실행하려면 `/weave-flow [docs]`를 사용하세요.
 
 **Maskweaver 통합**:
 - **Masks**: Task별 전문가 마스크 자동 선택
@@ -77,8 +77,8 @@ AI가 자동으로 검증 루프를 돌리고, 완료되면 유저에게 전달�
    │   ├─ 최소 구현 (Green)
    │   ├─ 정리 (Refactor)
    │   └─ AI 자동 검증 → PASS/FAIL
-   │       ├─ PASS → `weave task ... taskAction=pass`로 상태 업데이트 (옵션: quick verify/commit)
-   │       └─ FAIL → `weave task ... taskAction=fail`로 기록 → 글로벌 지식 검색 → 수정 → 재검증
+   │       ├─ PASS → `weave craft ...` 재실행으로 상태 업데이트 (옵션: quick verify/commit)
+   │       └─ FAIL → 실패 기록 + 글로벌 지식 검색 → 수정 → `weave craft ...` 재실행
    └─ 5회 초과 → 유저에게 도움 요청
    ↓
 4. UPDATE PLAN (Phase 상태 업데이트)

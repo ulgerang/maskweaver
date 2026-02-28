@@ -84,7 +84,7 @@ describe('Weave Flow Command', () => {
     );
 
     expect(output).toContain('### 2) Craft');
-    expect(output).toContain('### 3) Task Auto');
+    expect(output).toContain('### Auto Loop');
 
     const p1 = manager.getPhase('P1');
     expect(p1).not.toBeNull();
@@ -222,7 +222,7 @@ describe('Weave Flow Command', () => {
     expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
   }, 20000);
 
-  test('task auto is blocked until plan approval', async () => {
+  test('craft auto-loop is blocked until plan approval', async () => {
     const tool = createWeaveTool();
 
     await tool.execute(
@@ -231,7 +231,7 @@ describe('Weave Flow Command', () => {
     );
 
     const output = await tool.execute(
-      { command: 'task', phaseId: 'P1', taskAction: 'auto' },
+      { command: 'craft', phaseId: 'P1' },
       { worktree: tempDir },
     );
 
@@ -239,7 +239,7 @@ describe('Weave Flow Command', () => {
     expect(output).toContain('weave command=approve-plan');
   }, 20000);
 
-  test('task auto creates replanned subtasks after repeated failures', async () => {
+  test('craft auto-loop creates replanned subtasks after repeated failures', async () => {
     const tool = createWeaveTool();
 
     await tool.execute(
@@ -298,7 +298,7 @@ describe('Weave Flow Command', () => {
     await manager.savePlan(plan);
 
     const firstRun = await tool.execute(
-      { command: 'task', phaseId: 'P1', taskAction: 'auto' },
+      { command: 'craft', phaseId: 'P1' },
       { worktree: tempDir },
     );
 
@@ -311,7 +311,7 @@ describe('Weave Flow Command', () => {
     let output = '';
     try {
       output = await tool.execute(
-        { command: 'task', phaseId: 'P1', taskAction: 'auto' },
+        { command: 'craft', phaseId: 'P1' },
         { worktree: tempDir },
       );
     } finally {

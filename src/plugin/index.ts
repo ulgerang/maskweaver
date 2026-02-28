@@ -80,6 +80,12 @@ interface InstallResult {
   errors: string[];
 }
 
+const REMOVED_WEAVE_COMMAND_FILES = [
+  'weave-task.md',
+  'weave-task-auto.md',
+  'wave-task-auto.md',
+];
+
 function getAssetsDir(): string {
   try {
     const __filename = fileURLToPath(import.meta.url);
@@ -177,6 +183,17 @@ function installAssets(projectDir: string): InstallResult {
     const commandsDest = path.join(targetDir, 'commands');
     if (fs.existsSync(commandsSrc)) {
       copyDirRecursive(commandsSrc, commandsDest, result, true);
+    }
+
+    // Hard-remove deprecated weave task commands so only craft/flow remain.
+    for (const commandFile of REMOVED_WEAVE_COMMAND_FILES) {
+      const legacyPath = path.join(commandsDest, commandFile);
+      if (!fs.existsSync(legacyPath)) continue;
+      try {
+        fs.unlinkSync(legacyPath);
+      } catch (e) {
+        result.errors.push(`Failed to remove deprecated command ${commandFile}: ${e}`);
+      }
     }
   }
 

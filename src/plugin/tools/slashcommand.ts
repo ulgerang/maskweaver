@@ -76,7 +76,7 @@ Maskweaver의 Phase-Driven Development 워크플로우입니다.
 | \`weave approve-plan\` | 구현 전 계획 승인 게이트 통과 |
 | \`weave design [docs]\` | 요구사항 분석 → Phase 계획 |
 | \`weave craft [id]\` | Phase 실행 (자동 검증) |
-| \`weave flow [docs]\` | prepare -> approve-plan gate -> craft -> task auto |
+| \`weave flow [docs]\` | prepare -> approve-plan gate -> craft auto-loop |
 | \`weave status\` | 진행 상황 확인 |
 | \`weave help\` | 이 도움말 |
 
@@ -152,7 +152,7 @@ Example: weave command=craft phaseId="P1"`,
     'weave-flow': {
         metadata: {
             name: 'weave-flow',
-            description: '원커맨드 실행 (prepare -> approve-plan gate -> craft -> task auto)',
+            description: '원커맨드 실행 (prepare -> approve-plan gate -> craft auto-loop)',
             usage: '/weave flow [docsPath]',
             examples: ['/weave flow docs/', '/weave flow'],
         },
@@ -313,7 +313,7 @@ export function createSlashcommandTool() {
 - /weave prepare [docs] - Create research + spec + plan
 - /weave refine-plan - Apply plan-note directives to active plan
 - /weave approve-plan - Approve plan before implementation
-- /weave flow [docs] - One-command path (prepare -> approve-plan gate -> craft -> task auto)
+- /weave flow [docs] - One-command path (prepare -> approve-plan gate -> craft auto-loop)
 - /weave craft [phaseId] - Execute a phase
 - /weave status - View progress
 - /weave repair - Scan and auto-repair corrupted plan YAML files

@@ -183,12 +183,12 @@ export function formatExecutionPlan(plan: PhaseExecutionPlan): string {
     lines.push('### Instructions');
     lines.push('');
     lines.push('For each task above, delegate using `Task(<agent_tier>)` with the specified mask.');
-    lines.push('Track task progress with `weave task` (recommended).');
+    lines.push('Track progress with `weave craft` (auto task loop included).');
     lines.push('');
-    lines.push('**Suggested per-task loop:**');
-    lines.push(`1) Start: \`weave command=task phaseId="${plan.phaseId}" taskAction=start taskId="<TASK_ID>"\``);
-    lines.push('2) Delegate implementation to the selected agent tier + mask');
-    lines.push(`3) Pass + quick verify: \`weave command=task phaseId="${plan.phaseId}" taskAction=pass taskId="<TASK_ID>" verify=true verifyMode="quick"\``);
+    lines.push('**Suggested execution loop:**');
+    lines.push(`1) Run: \`weave command=craft phaseId="${plan.phaseId}"\``);
+    lines.push('2) Implement/delegate the current task with the selected agent tier + mask');
+    lines.push(`3) Rerun: \`weave command=craft phaseId="${plan.phaseId}"\` (quick verify + status update)`);
     lines.push('4) (Optional) Atomic commit: add `commit=true` (and `stageAll=true` if you want auto staging)');
     lines.push('');
     lines.push('After all tasks pass, run `weave approve` to run full verification and mark the phase complete.');

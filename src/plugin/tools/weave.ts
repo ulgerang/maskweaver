@@ -44,12 +44,11 @@ Commands:
 - prepare [docsPath]: Create research + spec + plan with defaults (vNext happy path)
 - refine-plan: Apply annotation notes to active plan
 - approve-plan: Mark plan reviewed/approved before implementation
-- flow [docsPath]: One-command path (prepare -> approve-plan gate -> craft -> task auto)
-- craft [phaseId]: Execute next phase automatically if omitted
+- flow [docsPath]: One-command path (prepare -> approve-plan gate -> craft auto-loop)
+- craft [phaseId]: Execute next phase automatically if omitted (includes auto task loop)
 - status: View overall progress
 - worktree: Manage git worktrees for parallel work
-- task: Run task loop (start/fail/retry/pass/auto)
- - verify: Run build/test verification for current worktree
+- verify: Run build/test verification for current worktree
 - approve [phaseId]: Mark phase complete (auto phase if omitted)
 - troubleshoot [error]: Search global knowledge for solutions
 - record [solution]: Record a troubleshooting solution
@@ -66,12 +65,12 @@ Examples:
 - weave troubleshoot "Cannot find module 'xyz'"`,
 
         args: {
-            command: z.enum(['research', 'spec', 'design', 'prepare', 'refine-plan', 'approve-plan', 'flow', 'craft', 'status', 'worktree', 'task', 'verify', 'troubleshoot', 'record', 'approve', 'help', 'repair'])
+            command: z.enum(['research', 'spec', 'design', 'prepare', 'refine-plan', 'approve-plan', 'flow', 'craft', 'status', 'worktree', 'verify', 'troubleshoot', 'record', 'approve', 'help', 'repair'])
                 .describe('Weave command to execute'),
             docsPath: z.string().optional()
                 .describe('Path to requirements documents (for design command)'),
             phaseId: z.string().optional()
-                .describe('Phase ID (optional for craft/task/approve)'),
+                .describe('Phase ID (optional for craft/approve)'),
             projectName: z.string().optional()
                 .describe('Project name (for design command)'),
             planName: z.string().optional()
@@ -104,14 +103,10 @@ Examples:
                 .describe('Stage all changes before commit (default: false)'),
             commitMessage: z.string().optional()
                 .describe('Commit message (optional)'),
-            taskAction: z.enum(['list', 'next', 'start', 'pass', 'fail', 'retry', 'auto']).optional()
-                .describe('Task action (for task command)'),
             taskId: z.string().optional()
-                .describe('Task ID (for task command)'),
-            taskError: z.string().optional()
-                .describe('Failure reason (for task fail)'),
+                .describe('Preferred task ID when resuming craft auto-loop'),
             verify: z.boolean().optional()
-                .describe('Run verification as part of task pass (default: true)'),
+                .describe('Run verification as part of craft auto-loop (default: true)'),
             error: z.string().optional()
                 .describe('Error message to search solutions for (for troubleshoot command)'),
             solution: z.string().optional()
@@ -124,7 +119,7 @@ Examples:
 
         execute: async (
             args: {
-                command: 'research' | 'spec' | 'design' | 'prepare' | 'refine-plan' | 'approve-plan' | 'flow' | 'craft' | 'status' | 'worktree' | 'task' | 'verify' | 'troubleshoot' | 'record' | 'approve' | 'help' | 'repair';
+                command: 'research' | 'spec' | 'design' | 'prepare' | 'refine-plan' | 'approve-plan' | 'flow' | 'craft' | 'status' | 'worktree' | 'verify' | 'troubleshoot' | 'record' | 'approve' | 'help' | 'repair';
                 docsPath?: string;
                 phaseId?: string;
                 projectName?: string;
@@ -143,9 +138,7 @@ Examples:
                 commit?: boolean;
                 stageAll?: boolean;
                 commitMessage?: string;
-                taskAction?: 'list' | 'next' | 'start' | 'pass' | 'fail' | 'retry' | 'auto';
                 taskId?: string;
-                taskError?: string;
                 verify?: boolean;
                 error?: string;
                 solution?: string;
@@ -188,9 +181,6 @@ Examples:
 
                     case 'worktree':
                         return await handleWorktree(args, basePath);
-
-                    case 'task':
-                        return await handleTask(args, basePath);
 
                     case 'verify':
                         return await handleVerify(args, basePath);
@@ -824,7 +814,7 @@ async function handleFlow(
         lines.push('');
         lines.push('Flow paused: plan gate failed. Re-plan before implementation.');
         lines.push(`Run: \`weave command=craft phaseId="${resolvedPhaseId}"\``);
-        lines.push(`Inspect: \`weave command=task phaseId="${resolvedPhaseId}" taskAction=list\``);
+        lines.push('Inspect: `weave command=status`');
 
         await appendWorkflowLesson(basePath, {
             trigger: 'plan_gate_failed',
@@ -864,6 +854,8 @@ async function handleFlow(
     const craftResult = await handleCraft({
         phaseId: resolvedPhaseId,
         projectType: args.projectType,
+        verify: true,
+        verifyMode: args.verifyMode || 'quick',
     }, basePath);
 
     lines.push('');
@@ -871,25 +863,12 @@ async function handleFlow(
     lines.push('');
     lines.push(craftResult);
 
-    const autoResult = await handleTask({
-        phaseId: resolvedPhaseId,
-        taskAction: 'auto',
-        verify: true,
-        verifyMode: args.verifyMode || 'quick',
-        projectType: args.projectType,
-    }, basePath);
-
-    lines.push('');
-    lines.push('### 3) Task Auto');
-    lines.push('');
-    lines.push(autoResult);
-
     const reviewLines: string[] = [
         `Flow executed for ${resolvedPhaseId}.`,
         `Plan gate: PASS (${planGate.nonTrivial ? 'non-trivial' : 'simple'} scope).`,
     ];
 
-    if (autoResult.includes('All tasks done')) {
+    if (craftResult.includes('All tasks done')) {
         lines.push('');
         if (args.autoApprove) {
             const approveResult = await handleApprove({
@@ -898,7 +877,7 @@ async function handleFlow(
                 verifyMode: 'full',
             }, basePath);
 
-            lines.push('### 4) Approve');
+            lines.push('### 3) Approve');
             lines.push('');
             lines.push(approveResult);
 
@@ -911,7 +890,7 @@ async function handleFlow(
             reviewLines.push(`All tasks done for ${resolvedPhaseId}; waiting for manual approve.`);
         }
     } else {
-        reviewLines.push(`Task auto paused for ${resolvedPhaseId}; continue from current task.`);
+        reviewLines.push(`Craft auto-loop paused for ${resolvedPhaseId}; rerun craft after implementation updates.`);
     }
 
     await syncWorkflowArtifacts(basePath, manager, {
@@ -949,10 +928,7 @@ async function handleCraft(
     args: {
         phaseId?: string;
         projectType?: string;
-        // Optional: allow craft to proxy task actions to reduce UX confusion.
-        taskAction?: 'list' | 'next' | 'start' | 'pass' | 'fail' | 'retry' | 'auto';
         taskId?: string;
-        taskError?: string;
         verify?: boolean;
         verifyMode?: 'quick' | 'full';
         commit?: boolean;
@@ -973,54 +949,6 @@ async function handleCraft(
     }
     if (!activePlan.planApproved) {
         return formatPlanApprovalRequired(basePath, activePlan);
-    }
-
-    // If a taskAction is provided, treat craft as a shorthand for the task loop.
-    // This lets users stick to a single mental model: "craft" for phase work.
-    if (args.taskAction) {
-        const manager = getPhaseManager(basePath);
-        await manager.loadPlan();
-
-        const derivedPhaseId = derivePhaseIdFromTaskId(args.taskId);
-        const resolvedPhaseId = phaseId || derivedPhaseId || manager.getNextPhase()?.id;
-        if (!resolvedPhaseId) {
-            return 'Error: phaseId is required (or create a plan first).';
-        }
-
-        const targetPhase = manager.getPhase(resolvedPhaseId);
-        if (!targetPhase) {
-            return `Error: Phase not found: ${resolvedPhaseId}`;
-        }
-
-        // Backfill tasks for legacy plans before task-loop proxying.
-        if (!targetPhase.tasks || targetPhase.tasks.length === 0) {
-            await manager.addTasks(resolvedPhaseId, generateDefaultPhaseTasks(targetPhase));
-        }
-
-        // Keep craft semantics for proxied task flow.
-        if (targetPhase.status === 'pending') {
-            await preparePhaseExecution({
-                phaseId: resolvedPhaseId,
-                projectType,
-                basePath,
-            });
-        }
-
-        return handleTask(
-            {
-                phaseId: resolvedPhaseId,
-                taskAction: args.taskAction,
-                taskId: args.taskId,
-                taskError: args.taskError,
-                verify: args.verify,
-                verifyMode: args.verifyMode,
-                commit: args.commit,
-                stageAll: args.stageAll,
-                commitMessage: args.commitMessage,
-                projectType,
-            },
-            basePath
-        );
     }
 
     if (!resolvedPhaseId) {
@@ -1098,13 +1026,33 @@ async function handleCraft(
         lines.push('');
         if (next) {
             lines.push(`Next: \`${next.id}\` (${next.status}) — ${next.name}`);
-            lines.push(`Run: \`weave command=task phaseId="${resolvedPhaseId}" taskAction=auto taskId="${next.id}"\``);
+            lines.push(`Continue: \`weave command=craft phaseId="${resolvedPhaseId}" taskId="${next.id}"\``);
         } else {
             lines.push(`All tasks done for ${resolvedPhaseId}. Run: weave command=approve phaseId="${resolvedPhaseId}"`);
         }
     }
 
-    // Return the plan — the Mask Weaver will delegate tasks via Task tool
+    const autoResult = await handleTask(
+        {
+            phaseId: resolvedPhaseId,
+            taskAction: 'auto',
+            taskId: args.taskId || next?.id,
+            verify: args.verify,
+            verifyMode: args.verifyMode,
+            commit: args.commit,
+            stageAll: args.stageAll,
+            commitMessage: args.commitMessage,
+            projectType,
+        },
+        basePath
+    );
+
+    lines.push('');
+    lines.push('### Auto Loop');
+    lines.push('');
+    lines.push(autoResult);
+
+    // Return the plan + current auto-loop execution result.
     return lines.join('\n');
 }
 
@@ -1431,7 +1379,7 @@ async function handleTask(
                     body: [
                         `⏸ Baseline captured for task: ${task.id}`,
                         'No implementation delta to verify yet.',
-                        'Implement code changes (or delegate), then run pass/auto again.',
+                        'Implement code changes (or delegate), then rerun `weave craft`.',
                     ].join('\n'),
                 };
             }
@@ -1446,7 +1394,7 @@ async function handleTask(
                     body: [
                         `⏸ No implementation delta detected for task: ${task.id}`,
                         'Task remains in_progress.',
-                        'Implement code changes (or delegate), then run pass/auto again.',
+                        'Implement code changes (or delegate), then rerun `weave craft`.',
                     ].join('\n'),
                 };
             }
@@ -1591,7 +1539,7 @@ async function handleTask(
             if (next) {
                 lines.push('');
                 lines.push(`Next: \`${next.id}\` (${next.status}) — ${next.name}`);
-                lines.push(`Run: \`weave command=task taskAction=auto phaseId="${phaseId}" taskId="${next.id}"\``);
+                lines.push(`Continue: \`weave command=craft phaseId="${phaseId}" taskId="${next.id}"\``);
             }
             return lines.join('\n');
         }
@@ -1608,7 +1556,7 @@ async function handleTask(
                 `- Status: \`${next.status}\``,
                 `- Task: ${next.name}`,
                 '',
-                `Continue: \`weave command=task taskAction=auto phaseId="${phaseId}" taskId="${next.id}"\``,
+                `Continue: \`weave command=craft phaseId="${phaseId}" taskId="${next.id}"\``,
             ].join('\n');
         }
 
@@ -1685,7 +1633,7 @@ async function handleTask(
             }
 
             lines.push('');
-            lines.push(`Retry: \`weave command=task taskAction=retry phaseId="${phaseId}" taskId="${task.id}"\``);
+            lines.push(`Retry: \`weave command=craft phaseId="${phaseId}" taskId="${task.id}"\``);
 
             if (err) {
                 await appendWorkflowLesson(basePath, {
@@ -1769,8 +1717,8 @@ async function handleTask(
                     } else {
                         lines.push(`▶ Started: ${next.id} — ${next.name}`);
                     }
-                    lines.push(`Implement/delegate this task first, then rerun auto.`);
-                    lines.push(`Continue: \`weave command=task phaseId="${phaseId}" taskAction=auto taskId="${next.id}"\``);
+                    lines.push('Implement/delegate this task first, then rerun `weave craft`.');
+                    lines.push(`Continue: \`weave command=craft phaseId="${phaseId}" taskId="${next.id}"\``);
                     return finalize(lines.join('\n'), [
                         `Auto loop waiting for implementation on ${next.id}.`,
                     ]);
@@ -1793,7 +1741,7 @@ async function handleTask(
                 if (!result.ok) {
                     if ((result as any).reason === 'no_changes') {
                         lines.push(`⏸ Waiting for implementation changes on: ${task.id}`);
-                        lines.push(`Resume after code changes: \`weave command=task phaseId="${phaseId}" taskAction=auto taskId="${task.id}"\``);
+                        lines.push(`Resume after code changes: \`weave command=craft phaseId="${phaseId}" taskId="${task.id}"\``);
                         return finalize(lines.join('\n'), [
                             `Auto loop waiting for code changes on ${task.id}.`,
                         ]);
@@ -1825,7 +1773,7 @@ async function handleTask(
 
                         lines.push(`🛑 Re-plan triggered: ${task.id} failed ${retries} times, but subtask generation failed.`);
                         lines.push('Stop and refine the plan before retrying the same implementation path.');
-                        lines.push(`Inspect: \`weave command=task phaseId="${phaseId}" taskAction=list\``);
+                        lines.push(`Inspect: \`weave command=status\``);
                         lines.push(`Refresh strategy: \`weave command=craft phaseId="${phaseId}"\``);
 
                         await appendWorkflowLesson(basePath, {
@@ -1840,7 +1788,7 @@ async function handleTask(
                     }
 
                     lines.push(`⏸ Stopped at failed task: ${task.id}`);
-                    lines.push(`Fix code, then rerun: \`weave command=task phaseId="${phaseId}" taskAction=auto\``);
+                    lines.push(`Fix code, then rerun: \`weave command=craft phaseId="${phaseId}" taskId="${task.id}"\``);
                     return finalize(lines.join('\n'), [
                         `Auto loop stopped at failed task ${task.id}.`,
                     ]);
@@ -1848,7 +1796,7 @@ async function handleTask(
             }
 
             lines.push('⚠️ Auto loop stopped at safety limit.');
-            lines.push(`Inspect with: \`weave command=task phaseId="${phaseId}" taskAction=list\``);
+            lines.push(`Inspect with: \`weave command=craft phaseId="${phaseId}"\``);
             return finalize(lines.join('\n'), [
                 `Auto loop safety stop in ${phaseId}.`,
             ]);
@@ -2142,12 +2090,11 @@ To check installed version:
   | \`weave prepare [docs]\` | Create spec + phase plan (vNext happy path) |
   | \`weave refine-plan\` | Apply structured plan-note directives to active plan |
   | \`weave approve-plan\` | Mark plan approved before implementation |
-  | \`weave flow [docs]\` | One-command path (prepare -> approve-plan gate -> craft -> task auto) |
+  | \`weave flow [docs]\` | One-command path (prepare -> approve-plan gate -> craft auto-loop) |
   | \`weave design [docs]\` | Analyze requirements and create phase plan |
-  | \`weave craft [id]\` | Execute a phase (auto-select next if omitted) |
+  | \`weave craft [id]\` | Execute a phase with automatic task loop (auto-select next if omitted) |
   | \`weave status\` | View progress |
   | \`weave worktree ...\` | Manage git worktrees for parallel work |
-  | \`weave task ...\` | Task loop (start/fail/retry/pass/auto) |
   | \`weave verify\` | Run build/test verification for current worktree |
   | \`weave approve [id]\` | Mark phase complete (auto phase + verification) |
   | \`weave repair\` | Scan and auto-repair corrupted plan YAML files |
@@ -2168,7 +2115,7 @@ To check installed version:
 weave prepare docs/                                      # Research + spec + plan
 weave refine-plan                                        # Apply plan-notes directives (optional)
 weave approve-plan                                       # Explicit approval gate
-weave flow                                               # Continue active plan/task
+weave flow                                               # Continue active plan with craft auto-loop
 weave flow autoApprove=true                              # Auto-run full verify + approve when tasks finish
 weave approve                                            # Auto-select current phase + full verify
 \`\`\`
@@ -2256,7 +2203,7 @@ async function autoReplanFailedTask(
     const retryCount = sourceTask.retryCount || 0;
     if (retryCount <= 0) return null;
 
-    // Freeze the repeatedly failing task so task auto can move on to replanned subtasks.
+    // Freeze the repeatedly failing task so craft auto-loop can move on to replanned subtasks.
     sourceTask.status = 'failed';
     sourceTask.maxRetries = Math.max(1, retryCount);
     sourceTask.retryCount = Math.max(retryCount, sourceTask.maxRetries);

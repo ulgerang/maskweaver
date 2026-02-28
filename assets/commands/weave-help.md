@@ -47,15 +47,13 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 | `/weave-prepare [docs]` | **research + spec + plan을 한 번에 생성** (vNext 기본 경로) |
 | `/weave-refine-plan` | `tasks/plan-notes.md` 지시문을 plan에 자동 반영 |
 | `/weave-approve-plan` | 구현 전 계획 승인 게이트 통과 |
-| `/weave-flow [docs]` | **원커맨드** prepare → approve-plan gate → craft → task auto |
+| `/weave-flow [docs]` | **원커맨드** prepare → approve-plan gate → craft auto-loop |
 | `/weave-design [docs]` | 요구사항 분석 → Phase 계획 (새 플랜 생성) |
 | `/weave-plan [docs]` | `/weave-design` 별칭 (호환용) |
-| `/weave-craft [phase-id]` | 활성 플랜의 Phase 실행 (id 생략 시 다음 Phase 자동 선택) |
+| `/weave-craft [phase-id]` | 활성 플랜의 Phase 실행 + 자동 task loop (id 생략 시 다음 Phase 자동 선택) |
 | `/weave-status` | 전체 플랜 목록 + 진행 상황 |
 | `/weave-switch [plan]` | 활성 플랜 전환 / 아카이브 |
 | `/weave-worktree` | git worktree 기반 병렬 작업(기능/Phase) 관리 |
-| `/weave-task` | Task 루프(start/fail/retry/pass/auto) + 옵션 검증/커밋 |
-| `/weave-task-auto [P#|P#-T#]` | 인자 최소화 자동 루프(quick verify 기본) |
 | `/weave-verify` | 빌드/테스트 검증 실행(프로젝트 유형 자동 감지) |
 | `/weave-approve [P#]` | Phase 승인(phase 생략 시 자동 선택, 검증 후 완료 처리) |
 | `/weave-help` | 이 도움말 |
@@ -67,7 +65,7 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 ```
 /weave-init                    ← 프로젝트 초기화 (1회)
     ↓
-/weave-flow docs/              ← (원커맨드) prepare→approve-plan gate→craft→task auto
+/weave-flow docs/              ← (원커맨드) prepare→approve-plan gate→craft auto-loop
     ↓
 /weave-prepare docs/           ← (수동 경로) research+spec+plan 한 번에 생성
     ↓
@@ -75,8 +73,7 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
     ↓
 /weave-approve-plan            ← 구현 전 계획 승인 (필수)
     ↓
-/weave-craft                   ← 다음 Phase 자동 선택 실행
-/weave-task-auto               ← 현재 task 반자동 루프
+/weave-craft                   ← 다음 Phase 자동 선택 실행 + 자동 task loop
     ↓
 /weave-design wiki/new-feat    ← 두 번째 플랜 추가 (또는 prepare)
     ↓
@@ -154,15 +151,12 @@ Phase 실행 시 자동 검증:
 # 4. 다음 Phase 자동 선택 실행
 /weave-craft
 
-# 5. Task 반자동 루프 (구현 후 반복)
-/weave-task-auto
-
-# 6. 승인 (phase 생략 가능)
+# 5. 승인 (phase 생략 가능)
 /weave-approve
 
-# 7. 새 기능 추가? 새 플랜!
+# 6. 새 기능 추가? 새 플랜!
 /weave-design docs/new-feature
 
-# 8. 플랜 사이 전환
+# 7. 플랜 사이 전환
 /weave-switch emotion-diary
 ```

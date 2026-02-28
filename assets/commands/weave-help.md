@@ -42,20 +42,19 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 | 명령어 | 설명 |
 |--------|------|
 | `/weave-init` | Weave 초기화 (프로젝트당 1회) |
-| `/weave-research [docs]` | 문서를 깊게 읽고 `tasks/research.md` 생성 |
+| `/weave-research [docs]` | 문서+워크스페이스를 깊게 조사하고 `tasks/research.md` 생성 |
 | `/weave-spec [docs]` | 요구사항 정제 + 검증 기준(AC) 추출 (선택) |
-| `/weave-prepare [docs]` | **research + spec + plan을 한 번에 생성** (vNext 기본 경로) |
+| `/weave-prepare [docs]` | **research + spec + plan을 한 번에 생성** (큰 계획은 자동 분할) |
 | `/weave-refine-plan` | `tasks/plan-notes.md` 지시문을 plan에 자동 반영 |
 | `/weave-approve-plan` | 구현 전 계획 승인 게이트 통과 |
-| `/weave-flow [docs]` | **원커맨드** prepare → approve-plan gate → craft auto-loop |
-| `/weave-design [docs]` | 요구사항 분석 → Phase 계획 (새 플랜 생성) |
+| `/weave-flow [docs]` | **원커맨드** prepare → approve-plan gate → craft auto-loop + auto finalize |
+| `/weave-design [docs]` | 요구사항 분석 → Phase 계획 (새 플랜 생성, 큰 계획은 자동 분할) |
 | `/weave-plan [docs]` | `/weave-design` 별칭 (호환용) |
-| `/weave-craft [phase-id]` | 활성 플랜의 Phase 실행 + 자동 task loop (id 생략 시 다음 Phase 자동 선택) |
+| `/weave-craft [phase-id]` | 활성 플랜의 Phase 실행 + 자동 task loop + 목표 체크 + auto finalize |
 | `/weave-status` | 전체 플랜 목록 + 진행 상황 |
 | `/weave-switch [plan]` | 활성 플랜 전환 / 아카이브 |
 | `/weave-worktree` | git worktree 기반 병렬 작업(기능/Phase) 관리 |
 | `/weave-verify` | 빌드/테스트 검증 실행(프로젝트 유형 자동 감지) |
-| `/weave-approve [P#]` | Phase 승인(phase 생략 시 자동 선택, 검증 후 완료 처리) |
 | `/weave-help` | 이 도움말 |
 
 ---
@@ -151,12 +150,9 @@ Phase 실행 시 자동 검증:
 # 4. 다음 Phase 자동 선택 실행
 /weave-craft
 
-# 5. 승인 (phase 생략 가능)
-/weave-approve
-
-# 6. 새 기능 추가? 새 플랜!
+# 5. 새 기능 추가? 새 플랜!
 /weave-design docs/new-feature
 
-# 7. 플랜 사이 전환
+# 6. 플랜 사이 전환
 /weave-switch emotion-diary
 ```

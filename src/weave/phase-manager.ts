@@ -63,6 +63,21 @@ function serializePlan(plan: WeavePlan): string {
     if (plan.planName) {
         lines.push(`plan_name: ${yamlEscapeString(plan.planName)}`);
     }
+    if (plan.planRole) {
+        lines.push(`plan_role: ${yamlEscapeString(plan.planRole)}`);
+    }
+    if (plan.parentPlanName) {
+        lines.push(`parent_plan_name: ${yamlEscapeString(plan.parentPlanName)}`);
+    }
+    if (typeof plan.shardIndex === 'number') {
+        lines.push(`shard_index: ${plan.shardIndex}`);
+    }
+    if (typeof plan.shardTotal === 'number') {
+        lines.push(`shard_total: ${plan.shardTotal}`);
+    }
+    if (plan.nextPlanName) {
+        lines.push(`next_plan_name: ${yamlEscapeString(plan.nextPlanName)}`);
+    }
     lines.push(`project_name: ${yamlEscapeString(plan.projectName)}`);
     lines.push(`created_at: ${yamlEscapeString(plan.createdAt)}`);
     lines.push(`updated_at: ${yamlEscapeString(plan.updatedAt)}`);
@@ -325,11 +340,21 @@ export class PhaseManager {
         vision: string;
         architecture: WeavePlan['architecture'];
         phases: Omit<WeavePhase, 'tasks'>[];
+        planRole?: WeavePlan['planRole'];
+        parentPlanName?: string;
+        shardIndex?: number;
+        shardTotal?: number;
+        nextPlanName?: string;
     }): Promise<WeavePlan> {
         const now = new Date().toISOString();
 
         const plan: WeavePlan = {
             planName: input.planName,
+            planRole: input.planRole,
+            parentPlanName: input.parentPlanName,
+            shardIndex: input.shardIndex,
+            shardTotal: input.shardTotal,
+            nextPlanName: input.nextPlanName,
             projectName: input.projectName,
             createdAt: now,
             updatedAt: now,
@@ -620,6 +645,11 @@ export class PhaseManager {
     private rawToPlan(raw: any): WeavePlan {
         return {
             planName: raw.plan_name || raw.planName,
+            planRole: raw.plan_role || raw.planRole,
+            parentPlanName: raw.parent_plan_name || raw.parentPlanName,
+            shardIndex: raw.shard_index || raw.shardIndex,
+            shardTotal: raw.shard_total || raw.shardTotal,
+            nextPlanName: raw.next_plan_name || raw.nextPlanName,
             projectName: raw.project_name || raw.projectName || 'Unknown',
             createdAt: raw.created_at || raw.createdAt || new Date().toISOString(),
             updatedAt: raw.updated_at || raw.updatedAt || new Date().toISOString(),

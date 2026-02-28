@@ -191,16 +191,15 @@ Weave is Maskweaver's flagship workflow. It breaks work into testable phases, au
 | Command | Description |
 |---------|-------------|
 | `/weave init` | Initialize Weave (once per repo) |
-| `/weave research [docs]` | Deep-read docs and generate persistent `tasks/research.md` |
-| `/weave prepare [docs]` | (Manual path) Generate research + baseline spec + phase plan |
+| `/weave research [docs]` | Deep-read docs + workspace context and generate persistent `tasks/research.md` |
+| `/weave prepare [docs]` | (Manual path) Generate research + baseline spec + phase plan (auto-split if oversized) |
 | `/weave refine-plan` | Apply structured plan notes (`tasks/plan-notes.md`) to active plan |
 | `/weave approve-plan` | Explicit human approval gate before implementation |
-| `/weave flow [docs]` | (Recommended) One-command path: prepare -> approve-plan gate -> craft auto-loop |
+| `/weave flow [docs]` | (Recommended) One-command path: prepare -> approve-plan gate -> craft auto-loop + auto finalize |
 | `/weave spec [docs]` | Generate baseline spec only (optional) |
-| `/weave design [docs]` | Analyze requirements → Generate phase plan (`/weave plan` is an alias) |
-| `/weave craft [P#]` | Generate/run execution plan + auto task loop (auto-select next phase if omitted) |
+| `/weave design [docs]` | Analyze requirements → Generate phase plan (`/weave plan` alias, auto-split if oversized) |
+| `/weave craft [P#]` | Generate/run execution plan + auto task loop + goal check + auto finalize |
 | `/weave verify` | Run build/test verification (auto-detect) |
-| `/weave approve [P#]` | Verify (default) + mark phase complete (auto phase if omitted) |
 | `/weave worktree ...` | Manage git worktrees for parallel work |
 | `/weave status` | View project progress and stats |
 | `/weave help` | Show documentation |
@@ -229,11 +228,9 @@ Weave is Maskweaver's flagship workflow. It breaks work into testable phases, au
 5. CRAFT: /weave craft
      - Generates an execution plan + runs auto task loop
      - PASS/FAIL/retry/re-plan are handled in the craft loop
+     - Final goal check + full verification + phase completion are automatic
        ↓
-6. APPROVE: /weave approve
-      - Runs verification (full by default) and marks the phase completed
-       ↓
-7. HANDOFF: You validate UX/intent and move to next phase
+6. HANDOFF: You validate UX/intent and move to next phase
 ```
 
 #### Multi-Layer AI Verification
@@ -452,11 +449,11 @@ One-command resume:
 weave command=flow
 ```
 
-### Step 5: Verify and Approve the Phase
+### Step 5: Auto Finalization
 
 ```txt
 weave command=verify
-weave command=approve
+weave command=craft
 ```
 
 Progress output:

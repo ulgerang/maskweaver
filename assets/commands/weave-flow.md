@@ -1,5 +1,5 @@
 ---
-description: 원커맨드 실행 (prepare -> approve-plan gate -> craft auto-loop)
+description: 원커맨드 실행 (prepare -> approve-plan gate -> craft auto-loop + auto finalize)
 ---
 
 # /weave-flow - 원커맨드 실행
@@ -14,7 +14,7 @@ description: 원커맨드 실행 (prepare -> approve-plan gate -> craft auto-loo
 - `approval gate`: `approve-plan` 전에는 구현 단계로 내려가지 않음
 - `craft`: 실행 대상 phase 준비 + 자동 task 루프 실행
 - `craft auto-loop` 내 반복 실패 시 re-plan 서브태스크 자동 생성
-- (옵션) `approve`: 모든 task가 끝나면 full verify + phase approve
+- `craft` 마지막에 phase 목표 체크 + full verify + auto finalize
 
 > 목표: 유저가 명령을 여러 번 기억하지 않고, 한 번의 호출로 실행 흐름에 진입하되,
 > 구현 전 승인 게이트는 반드시 지키도록 합니다.
@@ -52,16 +52,6 @@ weave command=flow
 > 참고: plan이 아직 승인되지 않았다면 flow는 approval gate에서 멈추고
 > `weave command=approve-plan` 실행을 안내합니다.
 
-모든 task 완료 후 자동 approve를 원하면:
-
-```txt
-weave command=flow autoApprove=true
-```
-
-`autoApprove=true`면 내부적으로 `weave approve`(full verify)를 실행합니다.
-
----
-
 ## 산출물
 
 - `tasks/todo.md`: 현재 plan/phase/task 체크리스트 + 최근 리뷰
@@ -72,4 +62,4 @@ weave command=flow autoApprove=true
 ## 다음 단계
 
 - 구현을 반영한 뒤 `/weave-flow`를 다시 실행하면 같은 phase/task에서 이어서 진행합니다.
-- 모든 task가 끝나면 `/weave-approve`로 완료 처리하세요.
+- 모든 task가 끝나면 craft가 자동으로 finalize를 수행합니다.

@@ -172,16 +172,15 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
 | 명령어 | 설명 |
 |--------|------|
 | `/weave init` | Weave 초기화 (프로젝트당 1회) |
-| `/weave research [docs]` | 문서를 깊게 읽고 `tasks/research.md` 생성 |
-| `/weave prepare [docs]` | (수동 경로) research + baseline spec + phase plan 생성 |
+| `/weave research [docs]` | 문서 + 워크스페이스 맥락을 깊게 읽고 `tasks/research.md` 생성 |
+| `/weave prepare [docs]` | (수동 경로) research + baseline spec + phase plan 생성 (큰 계획은 자동 분할) |
 | `/weave refine-plan` | `tasks/plan-notes.md` 지시문을 active plan에 반영 |
 | `/weave approve-plan` | 구현 전 사람이 계획 승인(게이트) |
-| `/weave flow [docs]` | (권장) 원커맨드 경로: prepare -> approve-plan gate -> craft auto-loop |
+| `/weave flow [docs]` | (권장) 원커맨드 경로: prepare -> approve-plan gate -> craft auto-loop + auto finalize |
 | `/weave spec [docs]` | baseline spec만 생성 (선택) |
-| `/weave design [docs]` | 요구사항 분석 → Phase 계획 생성 (`/weave plan`은 별칭/호환) |
-| `/weave craft [P#]` | Phase 실행 계획 생성/실행 + 자동 task loop (phase 생략 시 자동 선택) |
+| `/weave design [docs]` | 요구사항 분석 → Phase 계획 생성 (`/weave plan`은 별칭/호환, 큰 계획은 자동 분할) |
+| `/weave craft [P#]` | Phase 실행 계획 생성/실행 + 자동 task loop + 목표 체크 + auto finalize |
 | `/weave verify` | 빌드/테스트 검증 실행 (자동 감지) |
-| `/weave approve [P#]` | (기본)검증 후 Phase 완료 처리 (phase 생략 시 자동 선택) |
 | `/weave worktree ...` | git worktree 기반 병렬 작업 관리 |
 | `/weave status` | 프로젝트 진행 상황 및 통계 확인 |
 | `/weave help` | 도움말 표시 |
@@ -210,11 +209,9 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
 5. CRAFT: /weave craft
     - Phase 실행 계획 생성 + 자동 task loop 실행
     - PASS/FAIL/재시도/re-plan은 craft 루프에서 처리
+    - 마지막에 phase 목표 체크 + full verify + 완료 처리를 자동 수행
        ↓
-6. APPROVE: /weave approve
-    - (기본) verify 실행 후 Phase를 completed로 변경
-       ↓
-7. HANDOFF: 유저가 UX/의도 확인 후 다음 Phase로 진행
+6. HANDOFF: 유저가 UX/의도 확인 후 다음 Phase로 진행
 ```
 
 #### 다층 AI 검증 시스템
@@ -433,11 +430,11 @@ weave command=craft phaseId="P1" taskId="P1-T1"
 weave command=flow
 ```
 
-### 5단계: 검증 및 Phase 완료 처리
+### 5단계: 자동 완료 처리
 
 ```txt
 weave command=verify
-weave command=approve
+weave command=craft
 ```
 
 진행 상황 출력:

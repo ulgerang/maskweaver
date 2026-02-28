@@ -84,6 +84,7 @@ const REMOVED_WEAVE_COMMAND_FILES = [
   'weave-task.md',
   'weave-task-auto.md',
   'wave-task-auto.md',
+  'weave-approve.md',
 ];
 
 function getAssetsDir(): string {
@@ -185,7 +186,7 @@ function installAssets(projectDir: string): InstallResult {
       copyDirRecursive(commandsSrc, commandsDest, result, true);
     }
 
-    // Hard-remove deprecated weave task commands so only craft/flow remain.
+    // Hard-remove deprecated weave commands to keep a craft-centric flow.
     for (const commandFile of REMOVED_WEAVE_COMMAND_FILES) {
       const legacyPath = path.join(commandsDest, commandFile);
       if (!fs.existsSync(legacyPath)) continue;

@@ -7,7 +7,7 @@
 
 import type { WeavePhase, WeavePlan } from '../types.js';
 import type { IntakeResult } from './intake.js';
-import { PhaseManager, getPhaseManager } from '../phase-manager.js';
+import { getPhaseManager } from '../phase-manager.js';
 
 // ============================================================================
 // Types
@@ -21,12 +21,20 @@ export interface PlanOptions {
     /** Base path for .opencode/weave (defaults to process.cwd()) */
     basePath?: string;
     userAnswers?: Record<string, string>;  // Answers to intake questions
+    /** Auto-split oversized plans into multiple shard plan files (default: true). */
+    splitPlans?: boolean;
+    /** Max phases per shard plan when splitting (default: 3). */
+    splitMaxPhases?: number;
+    /** Max estimated hours per shard plan when splitting (default: 10). */
+    splitMaxHours?: number;
 }
 
 export interface PlanResult {
     plan: WeavePlan;
     summary: string;
     estimatedTotalHours: number;
+    splitApplied?: boolean;
+    createdPlanNames?: string[];
 }
 
 // ============================================================================
@@ -39,6 +47,133 @@ const PHASE_SIZE_GUIDE = {
     tooBig: ['전체 인증 시스템', '전체 CRUD', '전체 UI'],
     targetHours: { min: 2, max: 6 },
 };
+
+const SPLIT_DEFAULTS = {
+    enabled: true,
+    maxPhasesPerShard: 3,
+    maxHoursPerShard: 10,
+    triggerMinPhases: 6,
+    triggerMinHours: 18,
+};
+
+type GeneratedPhase = Omit<WeavePhase, 'tasks'>;
+
+type SplitConfig = {
+    enabled: boolean;
+    maxPhasesPerShard: number;
+    maxHoursPerShard: number;
+    triggerMinPhases: number;
+    triggerMinHours: number;
+};
+
+function resolveSplitConfig(options: PlanOptions): SplitConfig {
+    const enabled = options.splitPlans ?? SPLIT_DEFAULTS.enabled;
+    const maxPhasesPerShard = Math.max(2, Math.min(8, Math.floor(options.splitMaxPhases ?? SPLIT_DEFAULTS.maxPhasesPerShard)));
+    const maxHoursPerShard = Math.max(4, Math.min(40, Math.floor(options.splitMaxHours ?? SPLIT_DEFAULTS.maxHoursPerShard)));
+
+    return {
+        enabled,
+        maxPhasesPerShard,
+        maxHoursPerShard,
+        triggerMinPhases: Math.max(maxPhasesPerShard + 1, SPLIT_DEFAULTS.triggerMinPhases),
+        triggerMinHours: Math.max(maxHoursPerShard + 4, SPLIT_DEFAULTS.triggerMinHours),
+    };
+}
+
+function shouldSplitPlan(phases: GeneratedPhase[], totalHours: number, config: SplitConfig): boolean {
+    if (!config.enabled) return false;
+    if (phases.length <= 1) return false;
+
+    if (phases.length >= config.triggerMinPhases) return true;
+    if (totalHours >= config.triggerMinHours) return true;
+    if (phases.length > config.maxPhasesPerShard) return true;
+    if (totalHours > config.maxHoursPerShard) return true;
+
+    return false;
+}
+
+function normalizePlanName(base: string): string {
+    return base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'weave-plan';
+}
+
+function createShardPlanName(rootPlanName: string, shardIndex: number): string {
+    return `${rootPlanName}-s${shardIndex}`;
+}
+
+function partitionPhases(phases: GeneratedPhase[], config: SplitConfig): GeneratedPhase[][] {
+    const groups: GeneratedPhase[][] = [];
+    let current: GeneratedPhase[] = [];
+    let currentHours = 0;
+
+    for (const phase of phases) {
+        const phaseHours = phase.estimatedHours || 3;
+        const shouldFlush = current.length > 0 && (
+            current.length >= config.maxPhasesPerShard
+            || (currentHours + phaseHours > config.maxHoursPerShard)
+        );
+
+        if (shouldFlush) {
+            groups.push(current);
+            current = [];
+            currentHours = 0;
+        }
+
+        current.push(phase);
+        currentHours += phaseHours;
+    }
+
+    if (current.length > 0) {
+        groups.push(current);
+    }
+
+    return groups;
+}
+
+function remapShardPhases(phases: GeneratedPhase[]): GeneratedPhase[] {
+    return phases.map((phase, idx) => ({
+        ...phase,
+        id: `P${idx + 1}`,
+        status: 'pending',
+        dependsOn: idx > 0 ? [`P${idx}`] : undefined,
+    }));
+}
+
+function appendShardNote(baseNotes: string | undefined, shardIndex: number, shardTotal: number, shardScope: string): string {
+    const notes: string[] = [];
+    if (baseNotes && baseNotes.trim().length > 0) {
+        notes.push(baseNotes.trim());
+    }
+    notes.push(`Shard ${shardIndex}/${shardTotal} scope: ${shardScope}`);
+    notes.push('This shard is part of an auto-split oversized plan.');
+    return notes.join(' | ');
+}
+
+function buildSplitSummary(
+    rootPlanName: string,
+    shards: Array<{ plan: WeavePlan; hours: number; scope: string }>,
+    totalHours: number
+): string {
+    const lines: string[] = [];
+    lines.push('## 📋 실행 계획서 (Auto-Split)');
+    lines.push('');
+    lines.push(`Oversized plan detected. Split into ${shards.length} shard plans for focused execution.`);
+    lines.push(`Root name: \`${rootPlanName}\``);
+    lines.push('');
+    lines.push('| Shard | Plan | Scope | Est. Hours |');
+    lines.push('|-------|------|-------|------------|');
+
+    for (let i = 0; i < shards.length; i += 1) {
+        const shard = shards[i];
+        lines.push(`| ${i + 1}/${shards.length} | \`${shard.plan.planName}\` | ${shard.scope} | ${shard.hours}h |`);
+    }
+
+    lines.push('');
+    lines.push(`**총 예상 시간**: ${totalHours}시간`);
+    lines.push(`**활성 플랜**: \`${shards[0]?.plan.planName || rootPlanName}\``);
+    lines.push('');
+    lines.push('Next: approve current shard, then run craft. Next shard is auto-activated when current shard is completed.');
+    return lines.join('\n');
+}
 
 // ============================================================================
 // Architecture Inference
@@ -161,15 +296,85 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
     // Calculate total estimated hours
     const estimatedTotalHours = phases.reduce((sum, p) => sum + (p.estimatedHours || 3), 0);
 
-    // Create plan
-    const normalizedPlanName = planName || toKebabCase(projectName) || 'weave-plan';
+    const normalizedPlanName = normalizePlanName(planName || toKebabCase(projectName) || 'weave-plan');
+    const splitConfig = resolveSplitConfig(options);
     const manager = getPhaseManager(basePath);
+
+    if (shouldSplitPlan(phases, estimatedTotalHours, splitConfig)) {
+        const groups = partitionPhases(phases, splitConfig);
+
+        // If partitioning still yields one group, keep the standard single-plan flow.
+        if (groups.length > 1) {
+            const createdShards: Array<{ plan: WeavePlan; hours: number; scope: string }> = [];
+
+            for (let i = 0; i < groups.length; i += 1) {
+                const shardIndex = i + 1;
+                const shardOriginalPhases = groups[i];
+                const shardPhases = remapShardPhases(shardOriginalPhases);
+                const shardPlanName = createShardPlanName(normalizedPlanName, shardIndex);
+                const nextPlanName = shardIndex < groups.length
+                    ? createShardPlanName(normalizedPlanName, shardIndex + 1)
+                    : undefined;
+
+                const shardScope = shardOriginalPhases.map(phase => phase.name).join(', ');
+                const shardHours = shardOriginalPhases.reduce((sum, phase) => sum + (phase.estimatedHours || 3), 0);
+
+                const shardPlan = await manager.createPlan({
+                    planName: shardPlanName,
+                    projectName,
+                    vision: `${vision} (Shard ${shardIndex}/${groups.length})`,
+                    architecture: {
+                        ...architecture,
+                        notes: appendShardNote(architecture.notes, shardIndex, groups.length, shardScope),
+                    },
+                    phases: shardPhases,
+                    planRole: 'shard',
+                    parentPlanName: normalizedPlanName,
+                    shardIndex,
+                    shardTotal: groups.length,
+                    nextPlanName,
+                });
+
+                for (const phase of shardPlan.phases) {
+                    const tasks = generateDefaultPhaseTasks(phase);
+                    if (tasks.length > 0) {
+                        await manager.addTasks(phase.id, tasks);
+                    }
+                }
+
+                createdShards.push({
+                    plan: shardPlan,
+                    hours: shardHours,
+                    scope: shardScope,
+                });
+            }
+
+            const firstShard = createdShards[0];
+            if (!firstShard) {
+                throw new Error('Failed to create shard plans from oversized plan');
+            }
+
+            // Set active shard to the first one for immediate execution.
+            await manager.savePlan(firstShard.plan);
+
+            return {
+                plan: firstShard.plan,
+                summary: buildSplitSummary(normalizedPlanName, createdShards, estimatedTotalHours),
+                estimatedTotalHours,
+                splitApplied: true,
+                createdPlanNames: createdShards.map(shard => shard.plan.planName || ''),
+            };
+        }
+    }
+
+    // Standard single-plan flow
     const weavePlan = await manager.createPlan({
         planName: normalizedPlanName,
         projectName,
         vision,
         architecture,
         phases,
+        planRole: 'standalone',
     });
 
     // vNext: Generate a baseline executable task list per phase
@@ -187,6 +392,8 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
         plan: weavePlan,
         summary,
         estimatedTotalHours,
+        splitApplied: false,
+        createdPlanNames: [weavePlan.planName || normalizedPlanName],
     };
 }
 

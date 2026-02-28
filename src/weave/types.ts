@@ -95,6 +95,13 @@ export interface WeavePlan {
     planApprovedAt?: string;
     planApprovalNotes?: string;
 
+    /** Optional metadata for automatically split plans. */
+    planRole?: 'standalone' | 'shard';
+    parentPlanName?: string;
+    shardIndex?: number;
+    shardTotal?: number;
+    nextPlanName?: string;
+
     phases: WeavePhase[];
     currentPhase?: string;
 }

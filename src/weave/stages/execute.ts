@@ -191,8 +191,8 @@ export function formatExecutionPlan(plan: PhaseExecutionPlan): string {
     lines.push(`3) Rerun: \`weave command=craft phaseId="${plan.phaseId}"\` (quick verify + status update)`);
     lines.push('4) (Optional) Atomic commit: add `commit=true` (and `stageAll=true` if you want auto staging)');
     lines.push('');
-    lines.push('After all tasks pass, run `weave approve` to run full verification and mark the phase complete.');
-    lines.push(`If you must bypass verification: \`weave command=approve phaseId="${plan.phaseId}" skipVerify=true\``);
+    lines.push('After all tasks pass, craft runs final goal check + full verification and auto-finalizes the phase.');
+    lines.push(`If finalization fails, fix issues and rerun: \`weave command=craft phaseId="${plan.phaseId}"\``);
     lines.push('');
     lines.push('**Decision flow per task:**');
     lines.push('1. Simple (flash) -> Handle directly or delegate to dummy-flash');

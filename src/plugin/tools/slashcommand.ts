@@ -70,13 +70,13 @@ Maskweaver의 Phase-Driven Development 워크플로우입니다.
 
 | 명령어 | 설명 |
 |--------|------|
-| \`weave research [docs]\` | 문서 깊이 분석 + research 아티팩트 생성 |
-| \`weave prepare [docs]\` | research + spec + plan 생성 |
+| \`weave research [docs]\` | 문서+워크스페이스 깊이 분석 + research 아티팩트 생성 |
+| \`weave prepare [docs]\` | research + spec + plan 생성 (큰 계획은 자동 분할) |
 | \`weave refine-plan\` | plan-notes를 active plan에 자동 반영 |
 | \`weave approve-plan\` | 구현 전 계획 승인 게이트 통과 |
-| \`weave design [docs]\` | 요구사항 분석 → Phase 계획 |
-| \`weave craft [id]\` | Phase 실행 (자동 검증) |
-| \`weave flow [docs]\` | prepare -> approve-plan gate -> craft auto-loop |
+| \`weave design [docs]\` | 요구사항 분석 → Phase 계획 (큰 계획은 자동 분할) |
+| \`weave craft [id]\` | Phase 실행 (auto task loop + goal check + auto finalize) |
+| \`weave flow [docs]\` | prepare -> approve-plan gate -> craft auto-loop + auto finalize |
 | \`weave status\` | 진행 상황 확인 |
 | \`weave help\` | 이 도움말 |
 
@@ -97,11 +97,12 @@ Example: weave command=design docsPath="docs/"`,
     'weave-research': {
         metadata: {
             name: 'weave-research',
-            description: '문서를 깊게 읽고 research 아티팩트 생성',
+            description: '문서+워크스페이스를 깊게 조사하고 research 아티팩트 생성',
             usage: '/weave research [docsPath]',
             examples: ['/weave research docs/', '/weave research wiki/spec.md'],
         },
         content: `Use the weave tool with command=research and specify docsPath.
+This command investigates both docs and current workspace context.
 
 Example: weave command=research docsPath="docs/"`,
     },
@@ -141,7 +142,7 @@ Example: weave command=approve-plan`,
     'weave-craft': {
         metadata: {
             name: 'weave-craft',
-            description: 'Phase 실행 (자동 검증 포함)',
+            description: 'Phase 실행 (auto task loop + goal check + auto finalize)',
             usage: '/weave craft [phaseId]',
             examples: ['/weave craft P1', '/weave craft P2'],
         },
@@ -152,7 +153,7 @@ Example: weave command=craft phaseId="P1"`,
     'weave-flow': {
         metadata: {
             name: 'weave-flow',
-            description: '원커맨드 실행 (prepare -> approve-plan gate -> craft auto-loop)',
+            description: '원커맨드 실행 (prepare -> approve-plan gate -> craft auto-loop + auto finalize)',
             usage: '/weave flow [docsPath]',
             examples: ['/weave flow docs/', '/weave flow'],
         },
@@ -308,13 +309,13 @@ export function createSlashcommandTool() {
     return {
         description: `Execute a slash command. Available commands include:
 - /weave help - Weave workflow help
-- /weave research [docs] - Deep-read docs and write research artifact
+- /weave research [docs] - Deep-read docs + workspace and write research artifact
 - /weave design [docs] - Analyze requirements and create plan
 - /weave prepare [docs] - Create research + spec + plan
 - /weave refine-plan - Apply plan-note directives to active plan
 - /weave approve-plan - Approve plan before implementation
-- /weave flow [docs] - One-command path (prepare -> approve-plan gate -> craft auto-loop)
-- /weave craft [phaseId] - Execute a phase
+- /weave flow [docs] - One-command path (prepare -> approve-plan gate -> craft auto-loop + auto finalize)
+- /weave craft [phaseId] - Execute a phase (auto task loop + goal check + auto finalize)
 - /weave status - View progress
 - /weave repair - Scan and auto-repair corrupted plan YAML files
 

@@ -38,18 +38,17 @@ export function createWeaveTool() {
         description: `Weave: Phase-driven development workflow with expert mask auto-selection and cross-project knowledge sharing.
 
 Commands:
-- research [docsPath]: Deep-read docs and write persistent research.md
+- research [docsPath]: Deep-read docs + workspace context and write persistent research.md
 - spec [docsPath]: Generate baseline spec (requirements + AC)
-- design [docsPath]: Analyze requirements and create phase-based plan
-- prepare [docsPath]: Create research + spec + plan with defaults (vNext happy path)
+- design [docsPath]: Analyze requirements and create phase-based plan (auto-splits oversized plans)
+- prepare [docsPath]: Create research + spec + plan with defaults (auto-splits oversized plans)
 - refine-plan: Apply annotation notes to active plan
 - approve-plan: Mark plan reviewed/approved before implementation
-- flow [docsPath]: One-command path (prepare -> approve-plan gate -> craft auto-loop)
-- craft [phaseId]: Execute next phase automatically if omitted (includes auto task loop)
+- flow [docsPath]: One-command path (prepare -> approve-plan gate -> craft auto-loop + auto finalize)
+- craft [phaseId]: Execute next phase automatically if omitted (includes auto task loop + goal check + auto finalize)
 - status: View overall progress
 - worktree: Manage git worktrees for parallel work
 - verify: Run build/test verification for current worktree
-- approve [phaseId]: Mark phase complete (auto phase if omitted)
 - troubleshoot [error]: Search global knowledge for solutions
 - record [solution]: Record a troubleshooting solution
 - repair: Scan and auto-repair corrupted plan YAML files
@@ -65,16 +64,22 @@ Examples:
 - weave troubleshoot "Cannot find module 'xyz'"`,
 
         args: {
-            command: z.enum(['research', 'spec', 'design', 'prepare', 'refine-plan', 'approve-plan', 'flow', 'craft', 'status', 'worktree', 'verify', 'troubleshoot', 'record', 'approve', 'help', 'repair'])
+            command: z.enum(['research', 'spec', 'design', 'prepare', 'refine-plan', 'approve-plan', 'flow', 'craft', 'status', 'worktree', 'verify', 'troubleshoot', 'record', 'help', 'repair'])
                 .describe('Weave command to execute'),
             docsPath: z.string().optional()
                 .describe('Path to requirements documents (for design command)'),
             phaseId: z.string().optional()
-                .describe('Phase ID (optional for craft/approve)'),
+                .describe('Phase ID (optional for craft)'),
             projectName: z.string().optional()
                 .describe('Project name (for design command)'),
             planName: z.string().optional()
                 .describe('Plan name (kebab-case) used for plan filename (optional)'),
+            splitPlans: z.boolean().optional()
+                .describe('Auto-split oversized plans into multiple shard plan files (default: true)'),
+            splitMaxPhases: z.number().int().min(2).max(8).optional()
+                .describe('Max phases per shard when splitPlans is enabled (default: 3)'),
+            splitMaxHours: z.number().int().min(4).max(40).optional()
+                .describe('Max estimated hours per shard when splitPlans is enabled (default: 10)'),
             planReview: z.string().optional()
                 .describe('Plan review summary text (for approve-plan command)'),
             notesPath: z.string().optional()
@@ -92,13 +97,11 @@ Examples:
             bootstrapWeave: z.boolean().optional()
                 .describe('Bootstrap .opencode/weave into new worktree (default: true)'),
             skipVerify: z.boolean().optional()
-                .describe('Skip verification before approve (default: false)'),
+                .describe('Skip final verification before auto-finalize (default: false)'),
             verifyMode: z.enum(['quick', 'full']).optional()
                 .describe('Verification mode: quick (typecheck+tests) or full (all available)'),
-            autoApprove: z.boolean().optional()
-                .describe('Automatically run approve after flow finishes all tasks (default: false)'),
             commit: z.boolean().optional()
-                .describe('Create a git commit on approve (default: false)'),
+                .describe('Create git commits during craft loop verification passes (default: false)'),
             stageAll: z.boolean().optional()
                 .describe('Stage all changes before commit (default: false)'),
             commitMessage: z.string().optional()
@@ -119,11 +122,14 @@ Examples:
 
         execute: async (
             args: {
-                command: 'research' | 'spec' | 'design' | 'prepare' | 'refine-plan' | 'approve-plan' | 'flow' | 'craft' | 'status' | 'worktree' | 'verify' | 'troubleshoot' | 'record' | 'approve' | 'help' | 'repair';
+                command: 'research' | 'spec' | 'design' | 'prepare' | 'refine-plan' | 'approve-plan' | 'flow' | 'craft' | 'status' | 'worktree' | 'verify' | 'troubleshoot' | 'record' | 'help' | 'repair';
                 docsPath?: string;
                 phaseId?: string;
                 projectName?: string;
                 planName?: string;
+                splitPlans?: boolean;
+                splitMaxPhases?: number;
+                splitMaxHours?: number;
                 planReview?: string;
                 notesPath?: string;
                 applyNotes?: boolean;
@@ -134,7 +140,6 @@ Examples:
                 bootstrapWeave?: boolean;
                 skipVerify?: boolean;
                 verifyMode?: 'quick' | 'full';
-                autoApprove?: boolean;
                 commit?: boolean;
                 stageAll?: boolean;
                 commitMessage?: string;
@@ -190,9 +195,6 @@ Examples:
 
                     case 'record':
                         return await handleRecord(args);
-
-                    case 'approve':
-                        return await handleApprove(args, basePath);
 
                     case 'repair':
                         return await handleRepair(basePath);
@@ -553,7 +555,14 @@ async function handleApprovePlan(
 }
 
 async function handleDesign(
-    args: { docsPath?: string; projectName?: string; planName?: string },
+    args: {
+        docsPath?: string;
+        projectName?: string;
+        planName?: string;
+        splitPlans?: boolean;
+        splitMaxPhases?: number;
+        splitMaxHours?: number;
+    },
     basePath: string
 ): Promise<string> {
     const { docsPath, projectName } = args;
@@ -606,6 +615,9 @@ async function handleDesign(
         projectName: projectName || 'My Project',
         planName: normalizePlanName(args.planName, projectName, resolvedDocsPath),
         basePath,
+        splitPlans: args.splitPlans,
+        splitMaxPhases: args.splitMaxPhases,
+        splitMaxHours: args.splitMaxHours,
     });
 
     await updateActivePlanReviewMetadata(basePath, {
@@ -657,7 +669,14 @@ async function handleSpec(
 }
 
 async function handlePrepare(
-    args: { docsPath?: string; projectName?: string; planName?: string },
+    args: {
+        docsPath?: string;
+        projectName?: string;
+        planName?: string;
+        splitPlans?: boolean;
+        splitMaxPhases?: number;
+        splitMaxHours?: number;
+    },
     basePath: string
 ): Promise<string> {
     const { docsPath, projectName } = args;
@@ -691,6 +710,9 @@ async function handlePrepare(
         projectName: projectName || 'My Project',
         planName: normalizedPlanName,
         basePath,
+        splitPlans: args.splitPlans,
+        splitMaxPhases: args.splitMaxPhases,
+        splitMaxHours: args.splitMaxHours,
     });
 
     await updateActivePlanReviewMetadata(basePath, {
@@ -728,10 +750,13 @@ async function handleFlow(
         docsPath?: string;
         projectName?: string;
         planName?: string;
+        splitPlans?: boolean;
+        splitMaxPhases?: number;
+        splitMaxHours?: number;
         phaseId?: string;
         projectType?: string;
         verifyMode?: 'quick' | 'full';
-        autoApprove?: boolean;
+        skipVerify?: boolean;
     },
     basePath: string
 ): Promise<string> {
@@ -743,6 +768,9 @@ async function handleFlow(
             docsPath: args.docsPath,
             projectName: args.projectName,
             planName: args.planName,
+            splitPlans: args.splitPlans,
+            splitMaxPhases: args.splitMaxPhases,
+            splitMaxHours: args.splitMaxHours,
         }, basePath);
 
         if (prepareResult.startsWith('Error:')) {
@@ -856,6 +884,7 @@ async function handleFlow(
         projectType: args.projectType,
         verify: true,
         verifyMode: args.verifyMode || 'quick',
+        skipVerify: args.skipVerify,
     }, basePath);
 
     lines.push('');
@@ -869,26 +898,7 @@ async function handleFlow(
     ];
 
     if (craftResult.includes('All tasks done')) {
-        lines.push('');
-        if (args.autoApprove) {
-            const approveResult = await handleApprove({
-                phaseId: resolvedPhaseId,
-                projectType: args.projectType,
-                verifyMode: 'full',
-            }, basePath);
-
-            lines.push('### 3) Approve');
-            lines.push('');
-            lines.push(approveResult);
-
-            reviewLines.push(approveResult.includes('❌')
-                ? `Auto-approve failed for ${resolvedPhaseId}.`
-                : `Auto-approve completed for ${resolvedPhaseId}.`);
-        } else {
-            lines.push(`Next: \`weave command=approve phaseId="${resolvedPhaseId}"\``);
-            lines.push('Tip: set `autoApprove=true` in flow to auto-run full verification + approve.');
-            reviewLines.push(`All tasks done for ${resolvedPhaseId}; waiting for manual approve.`);
-        }
+        reviewLines.push(`All tasks done for ${resolvedPhaseId}; phase finalization handled automatically in craft.`);
     } else {
         reviewLines.push(`Craft auto-loop paused for ${resolvedPhaseId}; rerun craft after implementation updates.`);
     }
@@ -931,6 +941,7 @@ async function handleCraft(
         taskId?: string;
         verify?: boolean;
         verifyMode?: 'quick' | 'full';
+        skipVerify?: boolean;
         commit?: boolean;
         stageAll?: boolean;
         commitMessage?: string;
@@ -1028,7 +1039,7 @@ async function handleCraft(
             lines.push(`Next: \`${next.id}\` (${next.status}) — ${next.name}`);
             lines.push(`Continue: \`weave command=craft phaseId="${resolvedPhaseId}" taskId="${next.id}"\``);
         } else {
-            lines.push(`All tasks done for ${resolvedPhaseId}. Run: weave command=approve phaseId="${resolvedPhaseId}"`);
+            lines.push(`All tasks done for ${resolvedPhaseId}. Final goal check + auto finalize will run in this craft execution.`);
         }
     }
 
@@ -1051,6 +1062,85 @@ async function handleCraft(
     lines.push('### Auto Loop');
     lines.push('');
     lines.push(autoResult);
+
+    const autoCompleted = autoResult.includes(`All tasks done for ${resolvedPhaseId}`);
+    if (autoCompleted) {
+        await manager.loadPlan();
+        const finalizedPhase = manager.getPhase(resolvedPhaseId);
+
+        if (finalizedPhase) {
+            const goalCheck = evaluatePhaseGoal(finalizedPhase);
+
+            lines.push('');
+            lines.push('### Final Goal Check');
+            lines.push('');
+            lines.push(`Phase goal (done_when): ${finalizedPhase.doneWhen || '(missing)'}`);
+            for (const check of goalCheck.checks) {
+                lines.push(`- ${check.passed ? 'PASS' : 'FAIL'}: ${check.label}`);
+            }
+
+            if (!goalCheck.passed) {
+                const metadataFailures = goalCheck.failedLabels.filter(label =>
+                    label.includes('done_when') || label.includes('checklist')
+                );
+
+                if (metadataFailures.length > 0) {
+                    lines.push('');
+                    lines.push('🛑 Final goal check failed due to phase metadata gaps.');
+                    lines.push('Update the phase definition, then re-approve the plan before continuing.');
+                    lines.push('Suggested path:');
+                    lines.push('- `weave command=refine-plan`');
+                    lines.push('- `weave command=approve-plan`');
+                    lines.push(`- \`weave command=craft phaseId="${resolvedPhaseId}"\``);
+                    return lines.join('\n');
+                }
+
+                const followupTask = await ensureGoalCheckFollowupTask(manager, resolvedPhaseId, goalCheck.failedLabels);
+
+                lines.push('');
+                lines.push('⚠️ Final goal check failed. Craft loop is re-entered with a follow-up task.');
+                if (followupTask) {
+                    lines.push(`Created follow-up task: \`${followupTask.id}\` — ${followupTask.name}`);
+                }
+
+                const reentryResult = await handleTask(
+                    {
+                        phaseId: resolvedPhaseId,
+                        taskAction: 'auto',
+                        taskId: followupTask?.id,
+                        verify: args.verify,
+                        verifyMode: args.verifyMode,
+                        commit: args.commit,
+                        stageAll: args.stageAll,
+                        commitMessage: args.commitMessage,
+                        projectType,
+                    },
+                    basePath
+                );
+
+                lines.push('');
+                lines.push('### Auto Loop (Re-entry)');
+                lines.push('');
+                lines.push(reentryResult);
+            } else {
+                const finalizeResult = await handleApprove(
+                    {
+                        phaseId: resolvedPhaseId,
+                        projectType,
+                        skipVerify: args.skipVerify,
+                        verifyMode: 'full',
+                        source: 'craft',
+                    },
+                    basePath
+                );
+
+                lines.push('');
+                lines.push('### Auto Finalize');
+                lines.push('');
+                lines.push(finalizeResult);
+            }
+        }
+    }
 
     // Return the plan + current auto-loop execution result.
     return lines.join('\n');
@@ -1547,7 +1637,7 @@ async function handleTask(
         case 'next': {
             const next = nextActionable();
             if (!next) {
-                return `All tasks are done for ${phaseId}. If ready, run: weave command=approve phaseId="${phaseId}"`;
+                return `All tasks are done for ${phaseId}. Rerun \`weave craft\` to run final goal check + auto finalize.`;
             }
             return [
                 `## Next Task for ${phaseId}`,
@@ -1671,7 +1761,7 @@ async function handleTask(
             return finalize([
                 result.body,
                 next ? '' : '',
-                next ? `Next: \`${next.id}\` (${next.status}) — ${next.name}` : `All tasks done for ${phaseId}. Run: weave command=approve phaseId="${phaseId}"`,
+                next ? `Next: \`${next.id}\` (${next.status}) — ${next.name}` : `All tasks done for ${phaseId}. Rerun \`weave craft\` to run final goal check + auto finalize.`,
             ].filter(Boolean).join('\n'), [
                 `Task passed: ${task.id}`,
                 next ? `Next actionable task: ${next.id}.` : `All tasks passed for ${phaseId}.`,
@@ -1699,7 +1789,7 @@ async function handleTask(
                 const next = (preferred && preferred.status !== 'passed') ? preferred : nextActionable();
                 if (!next) {
                     lines.push(`✅ All tasks done for ${phaseId}.`);
-                    lines.push(`Next: \`weave command=approve phaseId="${phaseId}"\``);
+                    lines.push('Proceeding to final goal check in craft.');
                     return finalize(lines.join('\n'), [
                         `Auto loop completed: all tasks done for ${phaseId}.`,
                     ]);
@@ -1897,6 +1987,38 @@ async function handleRepair(basePath: string): Promise<string> {
     return summary;
 }
 
+async function maybeAdvanceToNextShard(
+    phaseManager: ReturnType<typeof getPhaseManager>,
+    basePath: string
+): Promise<string | null> {
+    const activePlan = await phaseManager.loadPlan();
+    if (!activePlan) return null;
+    if (activePlan.planRole !== 'shard' || !activePlan.nextPlanName) return null;
+
+    const allPhasesCompleted = activePlan.phases.length > 0
+        && activePlan.phases.every(phase => phase.status === 'completed');
+    if (!allPhasesCompleted) return null;
+
+    const allPlans = await phaseManager.loadAllPlans();
+    const nextPlan = allPlans.find(plan => plan.planName === activePlan.nextPlanName);
+    if (!nextPlan) {
+        return `Warning: next shard plan \`${activePlan.nextPlanName}\` not found.`;
+    }
+
+    await phaseManager.savePlan(nextPlan);
+
+    const shardLabel = (typeof nextPlan.shardIndex === 'number' && typeof nextPlan.shardTotal === 'number')
+        ? `${nextPlan.shardIndex}/${nextPlan.shardTotal}`
+        : 'next shard';
+
+    return [
+        `Auto-switched to shard plan: \`${nextPlan.planName}\` (${shardLabel}).`,
+        'Review/approve this shard before implementation:',
+        '- `weave command=approve-plan`',
+        '- `weave command=craft`',
+    ].join('\n');
+}
+
 async function handleApprove(
     args: {
         phaseId?: string;
@@ -1906,10 +2028,12 @@ async function handleApprove(
         commit?: boolean;
         stageAll?: boolean;
         commitMessage?: string;
+        source?: 'command' | 'craft';
     },
     basePath: string
 ): Promise<string> {
-    const { phaseId: requestedPhaseId, projectType, skipVerify, verifyMode, commit, stageAll, commitMessage } = args;
+    const { phaseId: requestedPhaseId, projectType, skipVerify, verifyMode, commit, stageAll, commitMessage, source = 'command' } = args;
+    const invokedByCraft = source === 'craft';
 
     const phaseManager = getPhaseManager(basePath);
     const loadedPlan = await phaseManager.loadPlan();
@@ -1919,7 +2043,7 @@ async function handleApprove(
         || loadedPlan?.phases.find(p => p.status !== 'completed')?.id;
 
     if (!resolvedPhaseId) {
-        return 'Error: No phase found to approve. Run `weave craft` first.';
+        return 'Error: No phase found to finalize. Run `weave craft` first.';
     }
 
     const finalizeApprove = async (message: string, reviewLines: string[]): Promise<string> => {
@@ -1947,29 +2071,34 @@ async function handleApprove(
                 '',
                 `❌ Verification failed at: ${verification.failedAt || 'unknown'}`,
                 '',
-                'Fix the failures and re-run approve.',
+                invokedByCraft
+                    ? 'Fix the failures and rerun `weave craft`.'
+                    : 'Fix the failures and re-run `weave craft`.',
                 'You can also run: `weave command=verify`',
             ].join('\n'), [
-                `Approve blocked: verification failed for ${resolvedPhaseId}.`,
+                `Finalization blocked: verification failed for ${resolvedPhaseId}.`,
             ]);
         }
 
-        // If no commands detected, allow approve but make it explicit.
+        // If no commands detected, allow finalization but make it explicit.
         if (verification.results.length === 0) {
             await phaseManager.markAllTasksPassed(resolvedPhaseId);
             const result = await handleUserResponse(resolvedPhaseId, 'approve', undefined, basePath);
+            const shardSwitch = await maybeAdvanceToNextShard(phaseManager, basePath);
             return finalizeApprove([
                 report,
                 '',
                 '> No verification commands detected; approved without automated checks.',
                 '',
                 result.message,
-            ].join('\n'), [
+                shardSwitch || '',
+            ].filter(Boolean).join('\n'), [
                 `Approved ${resolvedPhaseId} without automated verification commands.`,
-            ]);
+                shardSwitch ? 'Advanced to next shard.' : '',
+            ].filter(Boolean) as string[]);
         }
 
-        // Optional: commit on approve
+        // Optional: commit during finalization
         if (commit) {
             try {
                 await ensureGitRepo(basePath);
@@ -1983,13 +2112,13 @@ async function handleApprove(
                             report,
                             '',
                             '❌ No staged changes to commit.',
-                            'Stage files first, or run approve with `stageAll=true`.',
+                            'Stage files first, or rerun with `stageAll=true`.',
                             'Example:',
                             '```txt',
-                            `weave command=approve phaseId="${resolvedPhaseId}" commit=true stageAll=true`,
+                            `weave command=craft phaseId="${resolvedPhaseId}" commit=true stageAll=true`,
                             '```',
                         ].join('\n'), [
-                            `Approve commit blocked: no staged changes for ${resolvedPhaseId}.`,
+                            `Finalization commit blocked: no staged changes for ${resolvedPhaseId}.`,
                         ]);
                     }
                 }
@@ -2003,7 +2132,7 @@ async function handleApprove(
                         '',
                         formatSecretScanReport(findings),
                     ].join('\n'), [
-                        `Approve commit blocked by secret scan in ${resolvedPhaseId}.`,
+                        `Finalization commit blocked by secret scan in ${resolvedPhaseId}.`,
                     ]);
                 }
 
@@ -2023,6 +2152,7 @@ async function handleApprove(
 
                 await phaseManager.markAllTasksPassed(resolvedPhaseId);
                 const result = await handleUserResponse(resolvedPhaseId, 'approve', undefined, basePath);
+                const shardSwitch = await maybeAdvanceToNextShard(phaseManager, basePath);
                 return finalizeApprove([
                     report,
                     '',
@@ -2031,9 +2161,11 @@ async function handleApprove(
                     commitOutput ? ['```', commitOutput, '```'].join('\n') : '',
                     '',
                     result.message,
+                    shardSwitch || '',
                 ].filter(Boolean).join('\n'), [
-                    `Approved ${resolvedPhaseId} with commit.`,
-                ]);
+                    `Auto-finalized ${resolvedPhaseId} with commit.`,
+                    shardSwitch ? 'Advanced to next shard.' : '',
+                ].filter(Boolean) as string[]);
             } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
                 return finalizeApprove([
@@ -2041,7 +2173,7 @@ async function handleApprove(
                     '',
                     `❌ Commit failed: ${msg}`,
                 ].join('\n'), [
-                    `Approve commit failed for ${resolvedPhaseId}: ${sanitizeLessonText(msg)}`,
+                    `Finalization commit failed for ${resolvedPhaseId}: ${sanitizeLessonText(msg)}`,
                 ]);
             }
         }
@@ -2051,19 +2183,27 @@ async function handleApprove(
             await phaseManager.markAllTasksPassed(resolvedPhaseId);
         }
         const result = await handleUserResponse(resolvedPhaseId, 'approve', undefined, basePath);
+        const shardSwitch = await maybeAdvanceToNextShard(phaseManager, basePath);
         return finalizeApprove([
             report,
             '',
             result.message,
-        ].join('\n'), [
-            `Approved ${resolvedPhaseId} after verification pass.`,
-        ]);
+            shardSwitch || '',
+        ].filter(Boolean).join('\n'), [
+            `Auto-finalized ${resolvedPhaseId} after verification pass.`,
+            shardSwitch ? 'Advanced to next shard.' : '',
+        ].filter(Boolean) as string[]);
     }
 
     const result = await handleUserResponse(resolvedPhaseId, 'approve', undefined, basePath);
-    return finalizeApprove(result.message, [
-        `Approved ${resolvedPhaseId} with skipVerify=true.`,
-    ]);
+    const shardSwitch = await maybeAdvanceToNextShard(phaseManager, basePath);
+    return finalizeApprove([
+        result.message,
+        shardSwitch || '',
+    ].filter(Boolean).join('\n'), [
+        `Auto-finalized ${resolvedPhaseId} with skipVerify=true.`,
+        shardSwitch ? 'Advanced to next shard.' : '',
+    ].filter(Boolean) as string[]);
 }
 
 function getHelpMessage(): string {
@@ -2085,18 +2225,17 @@ To check installed version:
 
   | Command | Description |
   |---------|-------------|
-  | \`weave research [docs]\` | Deep-read docs and write persistent research.md |
+  | \`weave research [docs]\` | Deep-read docs + workspace context and write persistent research.md |
   | \`weave spec [docs]\` | Generate baseline spec (requirements + AC) |
-  | \`weave prepare [docs]\` | Create spec + phase plan (vNext happy path) |
+  | \`weave prepare [docs]\` | Create spec + phase plan (auto-splits oversized plans) |
   | \`weave refine-plan\` | Apply structured plan-note directives to active plan |
   | \`weave approve-plan\` | Mark plan approved before implementation |
-  | \`weave flow [docs]\` | One-command path (prepare -> approve-plan gate -> craft auto-loop) |
-  | \`weave design [docs]\` | Analyze requirements and create phase plan |
-  | \`weave craft [id]\` | Execute a phase with automatic task loop (auto-select next if omitted) |
+  | \`weave flow [docs]\` | One-command path (prepare -> approve-plan gate -> craft auto-loop + auto finalize) |
+  | \`weave design [docs]\` | Analyze requirements and create phase plan (auto-splits oversized plans) |
+  | \`weave craft [id]\` | Execute a phase with auto task loop + goal check + auto finalize |
   | \`weave status\` | View progress |
   | \`weave worktree ...\` | Manage git worktrees for parallel work |
   | \`weave verify\` | Run build/test verification for current worktree |
-  | \`weave approve [id]\` | Mark phase complete (auto phase + verification) |
   | \`weave repair\` | Scan and auto-repair corrupted plan YAML files |
   | \`weave troubleshoot [error]\` | Search global knowledge for solutions |
   | \`weave record [solution]\` | Record a new solution |
@@ -2116,8 +2255,7 @@ weave prepare docs/                                      # Research + spec + pla
 weave refine-plan                                        # Apply plan-notes directives (optional)
 weave approve-plan                                       # Explicit approval gate
 weave flow                                               # Continue active plan with craft auto-loop
-weave flow autoApprove=true                              # Auto-run full verify + approve when tasks finish
-weave approve                                            # Auto-select current phase + full verify
+weave craft                                              # Resume from current phase/task and auto-finalize on completion
 \`\`\`
 `;
 }
@@ -2125,6 +2263,11 @@ weave approve                                            # Auto-select current p
 const DEFAULT_REPLAN_THRESHOLD = 2;
 
 type PlanGateCheck = {
+    label: string;
+    passed: boolean;
+};
+
+type PhaseGoalCheck = {
     label: string;
     passed: boolean;
 };
@@ -2175,6 +2318,94 @@ function evaluatePlanGate(phase: {
         checks,
         failedLabels,
     };
+}
+
+function evaluatePhaseGoal(phase: {
+    id: string;
+    doneWhen?: string;
+    checklist?: string[];
+    tasks: Array<{ status: string; name: string; testCase?: string }>;
+}): {
+    passed: boolean;
+    checks: PhaseGoalCheck[];
+    failedLabels: string[];
+} {
+    const tasks = phase.tasks || [];
+    const doneWhen = (phase.doneWhen || '').trim();
+    const checklist = phase.checklist || [];
+
+    const taskText = tasks
+        .map(task => `${task.name} ${task.testCase || ''}`.toLowerCase())
+        .join('\n');
+
+    const doneWhenTokens = (doneWhen.toLowerCase().match(/[a-z0-9가-힣]{3,}/g) || [])
+        .slice(0, 8);
+    const doneWhenTrace = doneWhenTokens.length === 0
+        ? doneWhen.length > 0
+        : doneWhenTokens.some(token => taskText.includes(token));
+
+    const checks: PhaseGoalCheck[] = [
+        {
+            label: 'Phase done_when is defined',
+            passed: doneWhen.length > 0,
+        },
+        {
+            label: 'All phase tasks are passed',
+            passed: tasks.length > 0 && tasks.every(task => task.status === 'passed'),
+        },
+        {
+            label: 'Phase checklist is defined',
+            passed: checklist.length > 0,
+        },
+        {
+            label: 'Task descriptions are traceable to done_when',
+            passed: doneWhenTrace,
+        },
+    ];
+
+    const failedLabels = checks.filter(check => !check.passed).map(check => check.label);
+    return {
+        passed: failedLabels.length === 0,
+        checks,
+        failedLabels,
+    };
+}
+
+async function ensureGoalCheckFollowupTask(
+    manager: ReturnType<typeof getPhaseManager>,
+    phaseId: string,
+    failedLabels: string[]
+): Promise<{ id: string; name: string } | null> {
+    const plan = await manager.loadPlan();
+    if (!plan) return null;
+
+    const phase = plan.phases.find(p => p.id === phaseId);
+    if (!phase) return null;
+
+    const existing = phase.tasks.find(task =>
+        task.name.includes('[goal-check]') &&
+        (task.status === 'pending' || task.status === 'in_progress')
+    );
+    if (existing) {
+        return { id: existing.id, name: existing.name };
+    }
+
+    const taskId = `${phaseId}-T${getNextTaskNumber(phase.tasks)}`;
+    const taskName = `[goal-check] ${phase.name} 목표 정합성 보강`;
+    const testCase = failedLabels.length > 0
+        ? `final goal checks pass: ${failedLabels.join('; ')}`
+        : 'phase done_when and checklist are satisfied';
+
+    await manager.addTasks(phaseId, [
+        {
+            id: taskId,
+            name: taskName,
+            testCase,
+            maxRetries: 2,
+        },
+    ]);
+
+    return { id: taskId, name: taskName };
 }
 
 type AutoReplanResult = {

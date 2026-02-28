@@ -180,8 +180,8 @@ Phase Pn에 대해:
 
 vNext 구현(1차):
 
-- `weave task` 명령을 도입하여 task 상태 업데이트 + (옵션)quick verify/commit을 수행한다
-- `weave approve`는 phase 단위 full verify + 완료 처리(옵션: 커밋)를 담당한다
+- `weave craft`에 task loop를 내장하여 상태 업데이트 + (옵션)quick verify/commit을 수행한다
+- phase 완료 시 `weave craft`가 내부적으로 full verify + 완료 처리를 수행한다
 4. phase 레벨 검증(필수 AC 커버리지 중심)
 5. handoff(유저 체크리스트) 출력
 
@@ -325,7 +325,7 @@ GSD식 "작게 자주"를 Weave에도 도입한다.
 
 vNext 구현(1차):
 
-- `weave approve`에 옵션으로 commit 기능을 추가한다(기본값은 off)
+- phase 자동 완료 경로에 옵션으로 commit 기능을 추가한다(기본값은 off)
 - commit 직전에 staged 파일 목록을 대상으로 secret scan을 수행한다
 - 안전 기본값: staged가 없으면 커밋을 거부하고 `stageAll=true` 또는 수동 staging을 요구한다
 
@@ -369,8 +369,6 @@ vNext 구현(1차):
 - `weave spec ...` (기존 유지)
 - `weave design [docs/]` (기존 유지, alias로 `weave plan` 제공 가능)
 - `weave craft Pn` (강화)
-- `weave task ...` (새로 추가: task 루프, 옵션으로 quick verify/commit)
 - `weave verify` (새로 추가: 프로젝트 유형 자동 감지 기반 build/test 검증)
-- `weave approve` (강화: 기본적으로 verify 후 Phase 완료 처리, 필요 시 skip)
 - `weave status / switch / repair` (기존 유지)
 - `weave worktree ...` (새로 추가)

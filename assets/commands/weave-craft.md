@@ -1,5 +1,5 @@
 ---
-description: Phase 실행 (Build + Self-Verify Loop with Mask auto-selection)
+description: Phase 실행 (Build + Self-Verify Loop + 목표 체크 + auto finalize)
 ---
 
 # /weave-craft - Phase 실행
@@ -86,8 +86,8 @@ AI가 자동으로 검증 루프를 돌리고, 완료되면 유저에게 전달�
 5. USER HANDOFF (검증 완료 → 유저 테스트)
 ```
 
-> 참고: Phase 완료 처리는 `weave approve`가 담당합니다.
-> 기본적으로 full verify를 수행하고, 통과해야 Phase를 completed로 바꿉니다.
+> 참고: task loop 완료 후 `weave craft`가 phase 목표를 마지막으로 확인하고,
+> full verify까지 통과하면 phase를 자동으로 completed 처리합니다.
 
 ---
 

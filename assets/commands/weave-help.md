@@ -47,10 +47,10 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 | `/weave-prepare [docs]` | **research + spec + plan을 한 번에 생성** (큰 계획은 자동 분할) |
 | `/weave-refine-plan` | `tasks/plan-notes.md` 지시문을 plan에 자동 반영 |
 | `/weave-approve-plan` | 구현 전 계획 승인 게이트 통과 |
-| `/weave-flow [docs]` | **원커맨드** prepare → approve-plan gate → craft auto-loop + auto finalize |
+| `/weave-flow [docs]` | **원커맨드** prepare → approve-plan gate → craft |
 | `/weave-design [docs]` | 요구사항 분석 → Phase 계획 (새 플랜 생성, 큰 계획은 자동 분할) |
 | `/weave-plan [docs]` | `/weave-design` 별칭 (호환용) |
-| `/weave-craft [phase-id]` | 활성 플랜의 Phase 실행 + 자동 task loop + 목표 체크 + auto finalize |
+| `/weave-craft [phase-id]` | 활성 플랜의 Phase 실행 준비 (실행 컨텍스트 생성) |
 | `/weave-status` | 전체 플랜 목록 + 진행 상황 |
 | `/weave-switch [plan]` | 활성 플랜 전환 / 아카이브 |
 | `/weave-worktree` | git worktree 기반 병렬 작업(기능/Phase) 관리 |
@@ -64,7 +64,7 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
 ```
 /weave-init                    ← 프로젝트 초기화 (1회)
     ↓
-/weave-flow docs/              ← (원커맨드) prepare→approve-plan gate→craft auto-loop
+/weave-flow docs/              ← (원커맨드) prepare→approve-plan gate→craft
     ↓
 /weave-prepare docs/           ← (수동 경로) research+spec+plan 한 번에 생성
     ↓
@@ -72,7 +72,7 @@ Maskweaver의 **Phase-Driven Development** 워크플로우입니다.
     ↓
 /weave-approve-plan            ← 구현 전 계획 승인 (필수)
     ↓
-/weave-craft                   ← 다음 Phase 자동 선택 실행 + 자동 task loop
+/weave-craft                   ← 다음 Phase 자동 선택 실행 준비
     ↓
 /weave-design wiki/new-feat    ← 두 번째 플랜 추가 (또는 prepare)
     ↓

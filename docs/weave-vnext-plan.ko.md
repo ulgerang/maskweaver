@@ -180,8 +180,8 @@ Phase Pn에 대해:
 
 vNext 구현(1차):
 
-- `weave craft`에 task loop를 내장하여 상태 업데이트 + (옵션)quick verify/commit을 수행한다
-- phase 완료 시 `weave craft`가 내부적으로 full verify + 완료 처리를 수행한다
+- `weave craft`는 phase 실행 컨텍스트를 준비하고 다음 액션(구현/검증/승인)을 안내한다
+- phase 완료 처리는 `weave verify` + `weave approve-plan` 경로로 수행한다
 4. phase 레벨 검증(필수 AC 커버리지 중심)
 5. handoff(유저 체크리스트) 출력
 

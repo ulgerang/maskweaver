@@ -75,8 +75,8 @@ Maskweaver의 Phase-Driven Development 워크플로우입니다.
 | \`weave refine-plan\` | plan-notes를 active plan에 자동 반영 |
 | \`weave approve-plan\` | 구현 전 계획 승인 게이트 통과 |
 | \`weave design [docs]\` | 요구사항 분석 → Phase 계획 (큰 계획은 자동 분할) |
-| \`weave craft [id]\` | Phase 실행 (auto task loop + goal check + auto finalize) |
-| \`weave flow [docs]\` | prepare -> approve-plan gate -> craft auto-loop + auto finalize |
+| \`weave craft [id]\` | Phase 실행 준비 (실행 컨텍스트 생성) |
+| \`weave flow [docs]\` | prepare -> auto-approve -> craft -> verify -> finalize |
 | \`weave status\` | 진행 상황 확인 |
 | \`weave help\` | 이 도움말 |
 
@@ -142,7 +142,7 @@ Example: weave command=approve-plan`,
     'weave-craft': {
         metadata: {
             name: 'weave-craft',
-            description: 'Phase 실행 (auto task loop + goal check + auto finalize)',
+            description: 'Phase 실행 준비 (실행 컨텍스트 생성)',
             usage: '/weave craft [phaseId]',
             examples: ['/weave craft P1', '/weave craft P2'],
         },
@@ -153,7 +153,7 @@ Example: weave command=craft phaseId="P1"`,
     'weave-flow': {
         metadata: {
             name: 'weave-flow',
-            description: '원커맨드 실행 (prepare -> approve-plan gate -> craft auto-loop + auto finalize)',
+            description: '원커맨드 실행 (prepare -> auto-approve -> craft -> verify -> finalize)',
             usage: '/weave flow [docsPath]',
             examples: ['/weave flow docs/', '/weave flow'],
         },
@@ -314,8 +314,8 @@ export function createSlashcommandTool() {
 - /weave prepare [docs] - Create research + spec + plan
 - /weave refine-plan - Apply plan-note directives to active plan
 - /weave approve-plan - Approve plan before implementation
-- /weave flow [docs] - One-command path (prepare -> approve-plan gate -> craft auto-loop + auto finalize)
-- /weave craft [phaseId] - Execute a phase (auto task loop + goal check + auto finalize)
+- /weave flow [docs] - One-command path (prepare -> auto-approve -> craft -> verify -> finalize)
+- /weave craft [phaseId] - Prepare phase execution context
 - /weave status - View progress
 - /weave repair - Scan and auto-repair corrupted plan YAML files
 

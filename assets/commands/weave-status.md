@@ -120,13 +120,8 @@ description: 전체 플랜 목록 및 진행 상황 확인
 **시작**: 2026-02-06 10:30
 **경과**: 1.5시간
 
-### Tasks
-- [x] LocalStorage 유틸 생성 (kent-beck)
-- [x] 저장 함수 구현 (kent-beck)
-- [ ] 불러오기 함수 구현
-
 ### 사용된 마스크
-- Kent Beck (2 tasks)
+- Kent Beck
 
 ### 발생한 이슈
 - 1회 재시도: JSON 직렬화 오류 → 해결됨

@@ -184,7 +184,7 @@ Smart subagents for cost-efficient multi-agent workflows:
 
 **Phase-Driven Development** — "AI verifies, Human validates"
 
-Weave is Maskweaver's flagship workflow. It breaks work into testable phases, auto-selects expert masks, and runs self-verification loops before handing off to you.
+Weave is Maskweaver's flagship workflow. It breaks work into testable phases, auto-selects expert masks, and provides structured verification before handoff.
 
 #### Commands
 
@@ -195,10 +195,10 @@ Weave is Maskweaver's flagship workflow. It breaks work into testable phases, au
 | `/weave prepare [docs]` | (Manual path) Generate research + baseline spec + phase plan (auto-split if oversized) |
 | `/weave refine-plan` | Apply structured plan notes (`tasks/plan-notes.md`) to active plan |
 | `/weave approve-plan` | Explicit human approval gate before implementation |
-| `/weave flow [docs]` | (Recommended) One-command path: prepare -> approve-plan gate -> craft auto-loop + auto finalize |
+| `/weave flow [docs]` | (Recommended) One-command path: prepare -> auto-approve -> craft -> verify -> finalize |
 | `/weave spec [docs]` | Generate baseline spec only (optional) |
 | `/weave design [docs]` | Analyze requirements → Generate phase plan (`/weave plan` alias, auto-split if oversized) |
-| `/weave craft [P#]` | Generate/run execution plan + auto task loop + goal check + auto finalize |
+| `/weave craft [P#]` | Prepare phase execution context and guidance |
 | `/weave verify` | Run build/test verification (auto-detect) |
 | `/weave worktree ...` | Manage git worktrees for parallel work |
 | `/weave status` | View project progress and stats |
@@ -212,7 +212,7 @@ Weave is Maskweaver's flagship workflow. It breaks work into testable phases, au
 0. INIT (once): /weave init
        ↓
 1. ONE-COMMAND (recommended): /weave flow docs/
-    - runs: prepare -> approve-plan gate -> craft auto-loop
+    - runs: prepare -> auto-approve -> craft -> verify -> finalize
        ↓
    (or manual path)
        ↓
@@ -226,9 +226,9 @@ Weave is Maskweaver's flagship workflow. It breaks work into testable phases, au
     - required before craft execution
        ↓
 5. CRAFT: /weave craft
-     - Generates an execution plan + runs auto task loop
-     - PASS/FAIL/retry/re-plan are handled in the craft loop
-     - Final goal check + full verification + phase completion are automatic
+     - Generates an execution plan and next actions
+     - Implement/verify changes, then finalize with approve-plan
+     - Use `/weave verify` anytime for build/test checks
        ↓
 6. HANDOFF: You validate UX/intent and move to next phase
 ```
@@ -379,7 +379,7 @@ Fastest path (one command):
 /weave flow docs/
 ```
 
-This runs `prepare -> approve-plan gate -> craft auto-loop` in one shot.
+This runs `prepare -> auto-approve -> craft -> verify -> finalize` in one shot.
 
 Manual happy path (research + spec + plan in one command):
 
@@ -434,13 +434,13 @@ Start with the first phase:
 /weave craft
 ```
 
-`/weave craft` returns an execution plan and immediately runs the auto task loop. Re-run `/weave craft` after implementation updates to continue the same phase.
+`/weave craft` returns execution context for the phase. Implement changes, then rerun `/weave craft` if you want to refresh the plan view.
 
-### Step 4: Continue the Craft Loop
+### Step 4: Continue Implementation
 
 ```txt
 weave command=craft phaseId="P1"
-weave command=craft phaseId="P1" taskId="P1-T1"
+weave command=verify
 ```
 
 One-command resume:
@@ -449,30 +449,11 @@ One-command resume:
 weave command=flow
 ```
 
-### Step 5: Auto Finalization
+### Step 5: Finalize the Phase
 
 ```txt
 weave command=verify
-weave command=craft
-```
-
-Progress output:
-```markdown
-### Task Progress
-
-#### Task 1: EmotionButton Component
-- [x] Mask: 🧪 Kent Beck
-- [x] Tests written
-- [x] Implementation
-- [x] Verified ✅
-
-#### Task 2: State Management
-- [x] Mask: ⚛️ Dan Abramov
-- [x] Tests written
-- [x] Implementation
-- [ ] Verifying 🔄 (retry 2/5)
-  - 💡 Similar solution found: "React state timing issue"
-  - Fix: Added useEffect dependency array
+weave command=approve-plan
 ```
 
 ### Step 6: Handoff & Validate

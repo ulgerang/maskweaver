@@ -73,50 +73,74 @@ describe('Weave Flow Command', () => {
     cleanupTempDir(tempDir);
   });
 
-  test('flow with docs pauses at approval gate, then runs after approve-plan', async () => {
+  test('flow with docs runs prepare->approval->craft->verify->finalize in one shot', async () => {
     const tool = createWeaveTool();
-    const firstOutput = await tool.execute(
+    const output = await tool.execute(
       { command: 'flow', docsPath: 'docs' },
       { worktree: tempDir },
     );
 
-    expect(firstOutput).toContain('## ▶ Weave Flow');
-    expect(firstOutput).toContain('### 1) Prepare');
-    expect(firstOutput).toContain('### Plan Gate');
-    expect(firstOutput).toContain('### Plan Approval');
-    expect(firstOutput).toContain('Plan approval required before implementation.');
+    expect(output).toContain('## ▶ Weave Flow');
+    expect(output).toContain('### 1) Prepare');
+    expect(output).toContain('### Plan Gate');
+    expect(output).toContain('### Plan Approval');
+    expect(output).toContain('## ✅ Plan Approved');
+    expect(output).toContain('### 2) Craft');
+    expect(output).toContain('### 3) Verify');
+    expect(output).toContain('### 4) Finalize');
     expect(existsSync(join(tempDir, 'tasks', 'research.md'))).toBe(true);
 
     const manager = getPhaseManager(tempDir);
     const plan = await manager.loadPlan();
     expect(plan).not.toBeNull();
-    expect(plan?.planApproved).toBe(false);
+    expect(plan?.planApproved).toBe(true);
     expect(plan?.researchPath).toBe('tasks/research.md');
 
-    const p1Before = manager.getPhase('P1');
-    expect(p1Before).not.toBeNull();
-    expect(p1Before?.status).toBe('pending');
+    const p1 = manager.getPhase('P1');
+    expect(p1).not.toBeNull();
+    expect(p1?.status).toBe('completed');
+    expect(p1?.tasks.length).toBeGreaterThan(0);
+    expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
+  }, 20000);
 
-    const approveOutput = await tool.execute(
-      { command: 'approve-plan' },
+  test('flow continues in one-shot mode even when plan gate fails', async () => {
+    const tool = createWeaveTool();
+
+    await tool.execute(
+      { command: 'prepare', docsPath: 'docs' },
       { worktree: tempDir },
     );
-    expect(approveOutput).toContain('## ✅ Plan Approved');
+
+    const manager = getPhaseManager(tempDir);
+    const plan = await manager.loadPlan();
+    expect(plan).not.toBeNull();
+
+    if (!plan || plan.phases.length === 0) {
+      throw new Error('plan setup failed');
+    }
+
+    const phase = plan.phases[0];
+    phase.doneWhen = '';
+    phase.tasks = [
+      {
+        id: `${phase.id}-T1`,
+        name: `${phase.name} 구현`,
+        status: 'pending',
+        retryCount: 0,
+        maxRetries: 1,
+      },
+    ];
+    await manager.savePlan(plan);
 
     const output = await tool.execute(
       { command: 'flow' },
       { worktree: tempDir },
     );
 
+    expect(output).toContain('⚠️ Plan gate failed, but flow continues in one-shot mode.');
     expect(output).toContain('### 2) Craft');
-    expect(output).toContain('### Auto Loop');
-
-    const p1 = manager.getPhase('P1');
-    expect(p1).not.toBeNull();
-    expect(p1?.status).toBe('in_progress');
-    expect(p1?.tasks.length).toBeGreaterThan(0);
-    expect(p1?.tasks[0]?.status).toBe('in_progress');
-    expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
+    expect(output).toContain('### 3) Verify');
+    expect(output).toContain('### 4) Finalize');
   }, 20000);
 
   test('research command writes persistent artifact', async () => {
@@ -252,7 +276,7 @@ describe('Weave Flow Command', () => {
     expect(finalPlan?.planApproved).toBe(true);
   }, 20000);
 
-  test('flow without docs reuses active plan and keeps waiting when no implementation delta', async () => {
+  test('flow without docs reuses active plan and prepares execution context', async () => {
     const tool = createWeaveTool();
 
     await tool.execute(
@@ -277,22 +301,22 @@ describe('Weave Flow Command', () => {
 
     expect(output).toContain('Skipped (existing active plan reused).');
     expect(output).toContain('### Plan Gate');
-    expect(output).toContain('No implementation delta');
+    expect(output).toContain('### Next Steps');
 
     const manager = getPhaseManager(tempDir);
     await manager.loadPlan();
     const p1 = manager.getPhase('P1');
     expect(p1).not.toBeNull();
-    expect(p1?.tasks[0]?.status).toBe('in_progress');
+    expect(p1?.tasks[0]?.status).toBe('pending');
     expect(p1?.tasks[1]?.status).toBe('pending');
     expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
   }, 20000);
 
-  test('craft auto-loop is blocked until plan approval', async () => {
+  test('craft is blocked until plan approval', async () => {
     const tool = createWeaveTool();
 
     await tool.execute(
-      { command: 'flow', docsPath: 'docs' },
+      { command: 'prepare', docsPath: 'docs' },
       { worktree: tempDir },
     );
 
@@ -305,7 +329,7 @@ describe('Weave Flow Command', () => {
     expect(output).toContain('weave command=approve-plan');
   }, 20000);
 
-  test('craft auto-loop creates replanned subtasks after repeated failures', async () => {
+  test('craft prepares execution context after approval', async () => {
     const tool = createWeaveTool();
 
     await tool.execute(
@@ -318,88 +342,19 @@ describe('Weave Flow Command', () => {
       { worktree: tempDir },
     );
 
-    await tool.execute(
-      { command: 'flow' },
-      { worktree: tempDir },
-    );
-
-    const manager = getPhaseManager(tempDir);
-    const plan = await manager.loadPlan();
-    expect(plan).not.toBeNull();
-
-    const phase = manager.getPhase('P1');
-    expect(phase).not.toBeNull();
-
-    if (!plan || !phase) {
-      throw new Error('plan/phase setup failed');
-    }
-
-    const failedTask = phase.tasks[0];
-    failedTask.status = 'failed';
-    failedTask.retryCount = 1;
-    failedTask.maxRetries = 3;
-    failedTask.lastError = 'Verification failed at: Unit Tests';
-
-    for (let i = 1; i < phase.tasks.length; i += 1) {
-      phase.tasks[i].status = 'pending';
-    }
-
-    writeFileSync(
-      join(tempDir, 'package.json'),
-      JSON.stringify(
-        {
-          name: 'replan-fixture',
-          private: true,
-          scripts: {
-            typecheck: 'node -e "process.exit(1)"',
-            test: 'node -e "process.exit(1)"',
-          },
-        },
-        null,
-        2,
-      ),
-      'utf-8',
-    );
-
-    await manager.savePlan(plan);
-
-    const firstRun = await tool.execute(
+    const output = await tool.execute(
       { command: 'craft', phaseId: 'P1' },
       { worktree: tempDir },
     );
 
-    expect(firstRun).toContain('Retrying: P1-T1');
+    expect(output).toContain('## Phase P1:');
+    expect(output).toContain('### Next Steps');
 
-    // Ensure git-status delta exists so passTask doesn't stop at "no implementation delta".
-    const repoTouch = join(process.cwd(), `.tmp-replan-touch-${Date.now()}.txt`);
-    writeFileSync(repoTouch, `${Date.now()}`, 'utf-8');
-
-    let output = '';
-    try {
-      output = await tool.execute(
-        { command: 'craft', phaseId: 'P1' },
-        { worktree: tempDir },
-      );
-    } finally {
-      rmSync(repoTouch, { force: true });
-    }
-
-    expect(output).toContain('Auto re-plan created 3 subtasks');
-    expect(output).toContain('[re-plan]');
-
-    const updated = await manager.loadPlan();
-    expect(updated).not.toBeNull();
-
-    const updatedPhase = manager.getPhase('P1');
-    expect(updatedPhase).not.toBeNull();
-
-    if (!updatedPhase) {
-      throw new Error('updated phase missing');
-    }
-
-    const replanned = updatedPhase.tasks.filter(task => task.name.includes('[re-plan]'));
-    expect(replanned.length).toBe(3);
-    expect(replanned[0]?.status).toBe('in_progress');
-    expect(existsSync(join(tempDir, 'tasks', 'lessons.md'))).toBe(true);
+    const manager = getPhaseManager(tempDir);
+    await manager.loadPlan();
+    const phase = manager.getPhase('P1');
+    expect(phase).not.toBeNull();
+    expect(phase?.status).toBe('in_progress');
+    expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
   }, 30000);
 });

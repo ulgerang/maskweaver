@@ -17,7 +17,7 @@ description: research + spec + plan을 한 번에 생성 (vNext 기본 경로)
 > "리서치-계획-승인"을 빠르게 통과할 수 있는 기본 경로(happy path)를 제공합니다.
 
 > 더 단순한 원커맨드가 필요하면 `/weave-flow [docs]`를 사용하세요
-> (`prepare -> approve-plan gate -> craft auto-loop`를 한 번에 실행).
+> (`prepare -> auto-approve -> craft -> verify -> finalize`를 한 번에 실행).
 
 ---
 

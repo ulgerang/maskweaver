@@ -165,7 +165,7 @@ profile:
 
 **Phase 기반 개발** — "AI가 검증하고, 유저가 확인한다"
 
-Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가능한 Phase로 나누고, 전문가 마스크를 자동 선택하며, 유저에게 전달하기 전에 자체 검증 루프를 실행합니다.
+Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가능한 Phase로 나누고, 전문가 마스크를 자동 선택하며, 유저 전달 전 구조화된 검증 단계를 제공합니다.
 
 #### 명령어
 
@@ -176,10 +176,10 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
 | `/weave prepare [docs]` | (수동 경로) research + baseline spec + phase plan 생성 (큰 계획은 자동 분할) |
 | `/weave refine-plan` | `tasks/plan-notes.md` 지시문을 active plan에 반영 |
 | `/weave approve-plan` | 구현 전 사람이 계획 승인(게이트) |
-| `/weave flow [docs]` | (권장) 원커맨드 경로: prepare -> approve-plan gate -> craft auto-loop + auto finalize |
+| `/weave flow [docs]` | (권장) 원커맨드 경로: prepare -> auto-approve -> craft -> verify -> finalize |
 | `/weave spec [docs]` | baseline spec만 생성 (선택) |
 | `/weave design [docs]` | 요구사항 분석 → Phase 계획 생성 (`/weave plan`은 별칭/호환, 큰 계획은 자동 분할) |
-| `/weave craft [P#]` | Phase 실행 계획 생성/실행 + 자동 task loop + 목표 체크 + auto finalize |
+| `/weave craft [P#]` | Phase 실행 컨텍스트/가이드 생성 |
 | `/weave verify` | 빌드/테스트 검증 실행 (자동 감지) |
 | `/weave worktree ...` | git worktree 기반 병렬 작업 관리 |
 | `/weave status` | 프로젝트 진행 상황 및 통계 확인 |
@@ -193,7 +193,7 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
 0. INIT (1회): /weave init
        ↓
 1. 원커맨드(권장): /weave flow docs/
-    - 실행: prepare -> approve-plan gate -> craft auto-loop
+    - 실행: prepare -> auto-approve -> craft -> verify -> finalize
        ↓
    (또는 수동 경로)
        ↓
@@ -207,9 +207,9 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
     - craft 실행 전 필수 승인
        ↓
 5. CRAFT: /weave craft
-    - Phase 실행 계획 생성 + 자동 task loop 실행
-    - PASS/FAIL/재시도/re-plan은 craft 루프에서 처리
-    - 마지막에 phase 목표 체크 + full verify + 완료 처리를 자동 수행
+     - Phase 실행 계획과 다음 액션 안내 생성
+     - 구현/검증 후 approve-plan으로 phase 완료 처리
+     - `/weave verify`로 빌드/테스트 검증 가능
        ↓
 6. HANDOFF: 유저가 UX/의도 확인 후 다음 Phase로 진행
 ```
@@ -360,7 +360,7 @@ import { WeaveOrchestrator, GlobalKnowledge } from 'maskweaver/weave';
 /weave flow docs/
 ```
 
-한 번에 `prepare -> approve-plan gate -> craft auto-loop`까지 실행합니다.
+한 번에 `prepare -> auto-approve -> craft -> verify -> finalize`까지 실행합니다.
 
 수동 happy path (research + spec + plan 한 번에):
 
@@ -415,45 +415,26 @@ AI 인사이트가 포함된 현대적 감정 일기 앱 구축
 /weave craft
 ```
 
-`/weave craft`는 실행 계획을 생성한 뒤 자동 task loop를 즉시 실행합니다(phase 미지정 시 다음 phase 자동 선택). 구현 반영 후 같은 명령을 다시 실행하면 이어서 진행됩니다.
+`/weave craft`는 phase 실행 컨텍스트를 생성합니다(phase 미지정 시 다음 phase 자동 선택). 구현 반영 후 같은 명령으로 계획을 다시 확인할 수 있습니다.
 
-### 4단계: Craft 루프 이어서 진행
+### 4단계: 구현 진행
 
 ```txt
 weave command=craft phaseId="P1"
-weave command=craft phaseId="P1" taskId="P1-T1"
+weave command=verify
 ```
 
-원커맨드로 계속 이어서 진행하려면:
+원커맨드로 이어서 진행하려면:
 
 ```txt
 weave command=flow
 ```
 
-### 5단계: 자동 완료 처리
+### 5단계: Phase 완료 처리
 
 ```txt
 weave command=verify
-weave command=craft
-```
-
-진행 상황 출력:
-```markdown
-### Task 진행 상황
-
-#### Task 1: EmotionButton 컴포넌트
-- [x] 마스크: 🧪 켄트 벡
-- [x] 테스트 작성
-- [x] 구현
-- [x] 검증 완료 ✅
-
-#### Task 2: 상태 관리
-- [x] 마스크: ⚛️ 댄 아브라모프
-- [x] 테스트 작성
-- [x] 구현
-- [ ] 검증 중 🔄 (재시도 2/5)
-  - 💡 유사 솔루션 발견: "React 상태 타이밍 이슈"
-  - 수정: useEffect 의존성 배열 추가
+weave command=approve-plan
 ```
 
 ### 6단계: 핸드오프 & 검증

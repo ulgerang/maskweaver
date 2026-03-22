@@ -590,6 +590,7 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
 
                 for (const phase of shardPlan.phases) {
                     const tasks = generateDefaultPhaseTasks(phase, {
+                        changeId: shardPlan.planName || shardPlanName,
                         nodeIds: phaseNodeMap.get(phase.name) || [],
                         nodeFileMap: gdcSignals.nodeFileMap,
                     });
@@ -636,6 +637,7 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
     // vNext: Generate a baseline executable task list per phase
     for (const phase of weavePlan.phases) {
         const tasks = generateDefaultPhaseTasks(phase, {
+            changeId: weavePlan.planName || normalizedPlanName,
             nodeIds: phaseNodeMap.get(phase.name) || [],
             nodeFileMap: gdcSignals.nodeFileMap,
         });
@@ -659,6 +661,7 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
 function generateDefaultPhaseTasks(
     phase: WeavePhase,
     gdc?: {
+        changeId?: string;
         nodeIds?: string[];
         nodeFileMap?: Map<string, string[]>;
     }
@@ -667,6 +670,7 @@ function generateDefaultPhaseTasks(
     const baseId = phase.id;
     const title = phase.name;
     const nodeIds = (gdc?.nodeIds || []).slice(0, 4);
+    const changeRefs = gdc?.changeId ? [gdc.changeId] : undefined;
     const files = nodeIds
         .flatMap(nodeId => gdc?.nodeFileMap?.get(nodeId) || [])
         .filter(Boolean)
@@ -678,6 +682,7 @@ function generateDefaultPhaseTasks(
             name: `${title} 구현`,
             testCase: phase.doneWhen,
             nodeIds,
+            changeRefs,
             files,
             verify: [
                 { kind: 'checklist', value: phase.doneWhen },
@@ -693,6 +698,7 @@ function generateDefaultPhaseTasks(
             name: `${title} 테스트 추가/수정`,
             testCase: '관련 테스트가 통과한다',
             nodeIds,
+            changeRefs,
             files,
             dependsOn: [`${baseId}-T1`],
             verify: [
@@ -706,6 +712,7 @@ function generateDefaultPhaseTasks(
             id: `${baseId}-T3`,
             name: `${title} 검증 (빌드/테스트)`,
             testCase: '빌드/테스트가 통과한다',
+            changeRefs,
             dependsOn: [`${baseId}-T2`],
             verify: [
                 { kind: 'command', value: 'weave command=verify' },

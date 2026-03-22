@@ -9,18 +9,21 @@ import { z } from 'zod';
 // Inline shim: tool() is just an identity function in @opencode-ai/plugin
 const tool = <T>(input: T): T => input;
 
+import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 import { VERSION } from '../../version.js';
+import * as sharedContext from '../../shared-context/index.js';
 import { intake } from '../../weave/stages/intake.js';
 import { writeResearchReport } from '../../weave/stages/research.js';
 import { refinePlanFromNotes } from '../../weave/stages/refine.js';
 import { spec as createSpec } from '../../weave/stages/spec.js';
 import { plan } from '../../weave/stages/plan.js';
 import { preparePhaseExecution, formatExecutionPlan, runAIVerification, generateVerificationReport } from '../../weave/stages/execute.js';
+import { archiveChange } from '../../weave/stages/archive.js';
 import { handoff, generateStatusReport, handleUserResponse } from '../../weave/stages/handoff.js';
 import { getPhaseManager } from '../../weave/phase-manager.js';
 import { recommendVerificationCommands, formatRecommendedCommandsAsBash } from '../../weave/verification/index.js';
@@ -35,7 +38,29 @@ import {
 import { ensureGitRepo, stageAllChanges, listStagedFiles, hasStagedChanges, commitStagedChanges } from '../../weave/git.js';
 import { scanFilesForSecrets, loadSecretScanConfig, shouldBlockOnFindings, formatSecretScanReport } from '../../weave/security/secret-scan.js';
 import { searchTroubleshooting, recordTroubleshooting, GlobalKnowledge } from '../../weave/knowledge/global.js';
+import { ensureChangeArtifact, readChangeMetadata, writeChangeVerificationReport } from '../../weave/change-artifacts.js';
 import type { WeavePhase, WeavePlan } from '../../weave/types.js';
+import { analyzeParallelOpportunities, executionPlanToSquadTasks } from '../../weave/bridge.js';
+import {
+    acquireLoopOperatorLock,
+    appendLoopEvent,
+    createLoopRun,
+    ensureLoopContract,
+    listLoopRuns,
+    readLoopRun,
+    releaseLoopOperatorLock,
+    refreshLoopOperatorLock,
+    requestLoopStop,
+    toLoopOperatorStatePath,
+    resolveLoopId,
+    toLoopRunPath,
+    updateLoopRun,
+    writeLoopOperatorState,
+    writeLoopAttemptControllerNotes,
+    writeLoopAttemptTaskBundle,
+    writeLoopAttemptWorkerBrief,
+    writeLoopAttemptVerificationReport,
+} from '../../weave/loop.js';
 import {
     getEffectiveGdcConfig,
     runGdcMachineCommand,
@@ -58,12 +83,22 @@ Commands:
 - design [docsPath]: Analyze requirements and create phase-based plan (auto-splits oversized plans)
 - prepare [docsPath]: Create research + spec + plan with defaults (auto-splits oversized plans)
 - refine-plan: Apply annotation notes to active plan
-- approve-plan: Mark plan reviewed/approved before implementation
+- approve-plan: Approve the plan, or finalize a crafted phase when phaseId is provided
 - flow [docsPath]: One-command path (prepare -> auto-approve -> craft -> verify -> finalize)
 - craft [phaseId]: Prepare execution context for a phase (phase auto-select if omitted)
 - status: View overall progress
 - worktree: Manage git worktrees for parallel work
 - verify: Run build/test verification for current worktree
+- archive: Archive the verified active change artifact
+- loop-run: Run a bounded loop for the active change until verify passes or the run blocks
+- loop-start: Create a loop run without executing it
+- loop-status: Inspect a loop run by loopId
+- loop-stop: Request a semantic stop for a loop run
+- loop-list: List known loop runs
+- loop-sync: Sync delegated squad results back into a loop run
+- loop-watchdog: Poll loop delegation sessions and auto-sync completed runs
+- loop-poll: Bounded wait loop that watches delegated work and resumes automatically
+- loop-operator: Recurring operator run for delegated loops (automation-friendly)
 - troubleshoot [error]: Search global knowledge for solutions
 - record [solution]: Record a troubleshooting solution
 - repair: Scan and auto-repair corrupted plan YAML files
@@ -75,17 +110,19 @@ Examples:
 - weave refine-plan
 - weave approve-plan
 - weave craft P1
+- weave loop-run
+- weave loop-status loopId="docs-p1-loop-r1"
 - weave status
 - weave repair
 - weave troubleshoot "Cannot find module 'xyz'"`,
 
         args: {
-            command: z.enum(['init', 'research', 'spec', 'design', 'prepare', 'refine-plan', 'approve-plan', 'flow', 'craft', 'status', 'worktree', 'verify', 'troubleshoot', 'record', 'help', 'repair'])
+            command: z.enum(['init', 'research', 'spec', 'design', 'prepare', 'refine-plan', 'approve-plan', 'flow', 'craft', 'status', 'worktree', 'verify', 'archive', 'loop-run', 'loop-start', 'loop-step', 'loop-status', 'loop-stop', 'loop-list', 'loop-sync', 'loop-watchdog', 'loop-poll', 'loop-operator', 'troubleshoot', 'record', 'help', 'repair'])
                 .describe('Weave command to execute'),
             docsPath: z.string().optional()
                 .describe('Path to requirements documents (for design command)'),
             phaseId: z.string().optional()
-                .describe('Phase ID (optional for craft)'),
+                .describe('Phase ID (used by craft and approve-plan finalize flow)'),
             projectName: z.string().optional()
                 .describe('Project name (for design command)'),
             planName: z.string().optional()
@@ -134,11 +171,21 @@ Examples:
                 .describe('Context for the troubleshooting entry'),
             projectType: z.string().optional()
                 .describe('Project type (react, nextjs, go, etc.)'),
+            loopId: z.string().optional()
+                .describe('Readable loop run identifier (for loop commands)'),
+            maxIterations: z.number().int().min(1).max(20).optional()
+                .describe('Maximum loop iterations before blocking (default: 1 for manual loop slices)'),
+            maxNoProgress: z.number().int().min(0).max(10).optional()
+                .describe('Maximum repeated no-progress failures before blocking (default: 1)'),
+            pollIntervalMs: z.number().int().min(10).max(60000).optional()
+                .describe('Polling interval for loop-poll/watchdog-style commands (default: 1000ms)'),
+            pollCycles: z.number().int().min(1).max(1000).optional()
+                .describe('Maximum polling cycles for loop-poll (default: 30)'),
         },
 
         execute: async (
             args: {
-                command: 'init' | 'research' | 'spec' | 'design' | 'prepare' | 'refine-plan' | 'approve-plan' | 'flow' | 'craft' | 'status' | 'worktree' | 'verify' | 'troubleshoot' | 'record' | 'help' | 'repair';
+                command: 'init' | 'research' | 'spec' | 'design' | 'prepare' | 'refine-plan' | 'approve-plan' | 'flow' | 'craft' | 'status' | 'worktree' | 'verify' | 'archive' | 'loop-run' | 'loop-start' | 'loop-step' | 'loop-status' | 'loop-stop' | 'loop-list' | 'loop-sync' | 'loop-watchdog' | 'loop-poll' | 'loop-operator' | 'troubleshoot' | 'record' | 'help' | 'repair';
                 docsPath?: string;
                 phaseId?: string;
                 projectName?: string;
@@ -165,6 +212,11 @@ Examples:
                 solution?: string;
                 context?: string;
                 projectType?: string;
+                loopId?: string;
+                maxIterations?: number;
+                maxNoProgress?: number;
+                pollIntervalMs?: number;
+                pollCycles?: number;
             },
             context: { worktree: string }
         ): Promise<string> => {
@@ -209,6 +261,39 @@ Examples:
                     case 'verify':
                         return await handleVerify(args, basePath);
 
+                    case 'archive':
+                        return await handleArchive(basePath);
+
+                    case 'loop-run':
+                        return await handleLoopRun(args, basePath);
+
+                    case 'loop-start':
+                        return await handleLoopStart(args, basePath);
+
+                    case 'loop-step':
+                        return await handleLoopStep(args, basePath);
+
+                    case 'loop-status':
+                        return await handleLoopStatus(args, basePath);
+
+                    case 'loop-stop':
+                        return await handleLoopStop(args, basePath);
+
+                    case 'loop-list':
+                        return await handleLoopList(basePath);
+
+                    case 'loop-sync':
+                        return await handleLoopSync(args, basePath);
+
+                    case 'loop-watchdog':
+                        return await handleLoopWatchdog(args, basePath);
+
+                    case 'loop-poll':
+                        return await handleLoopPoll(args, basePath);
+
+                    case 'loop-operator':
+                        return await handleLoopOperator(args, basePath);
+
                     case 'troubleshoot':
                         return await handleTroubleshoot(args);
 
@@ -247,6 +332,11 @@ function getActivePlanArtifactPath(basePath: string, planName: string | undefine
     return toWorkspaceRelative(basePath, path.join(basePath, '.opencode', 'weave', 'plans', `${planName}.yaml`));
 }
 
+function deriveChangeId(plan: Pick<WeavePlan, 'activeChangeId' | 'planName' | 'projectName'>): string {
+    const preferred = plan.activeChangeId || plan.planName || plan.projectName;
+    return toKebabCase(preferred || 'weave-change') || 'weave-change';
+}
+
 async function updateActivePlanReviewMetadata(
     basePath: string,
     metadata: {
@@ -271,6 +361,541 @@ async function updateActivePlanReviewMetadata(
     }
 
     await manager.savePlan(activePlan);
+}
+
+async function ensureActivePlanChangeArtifact(basePath: string): Promise<{ changeId: string; metadataPath: string } | null> {
+    const manager = getPhaseManager(basePath);
+    const activePlan = await manager.loadPlan();
+    if (!activePlan) return null;
+
+    const changeId = deriveChangeId(activePlan);
+    activePlan.activeChangeId = changeId;
+    activePlan.changeIds = Array.from(new Set([...(activePlan.changeIds || []), changeId]));
+    await manager.savePlan(activePlan);
+
+    await ensureChangeArtifact({
+        basePath,
+        changeId,
+        planName: activePlan.planName || changeId,
+        projectName: activePlan.projectName,
+    });
+
+    return {
+        changeId,
+        metadataPath: `.opencode/weave/changes/${changeId}/metadata.yaml`,
+    };
+}
+
+async function resolveLoopContext(
+    basePath: string,
+    requestedPhaseId?: string
+): Promise<{ plan: WeavePlan; changeId: string; phaseId: string } | { error: string }> {
+    const manager = getPhaseManager(basePath);
+    const plan = await manager.loadPlan();
+    if (!plan) {
+        return { error: 'Error: No active plan. Run `weave prepare docs/` first.' };
+    }
+    if (!plan.planApproved) {
+        return { error: formatPlanApprovalRequired(basePath, plan) };
+    }
+
+    const phaseId = requestedPhaseId
+        || plan.currentPhase
+        || plan.phases.find(phase => phase.status === 'in_progress')?.id
+        || plan.phases.find(phase => phase.status !== 'completed')?.id;
+    if (!phaseId) {
+        return { error: 'Error: No phase found for loop execution.' };
+    }
+
+    const phase = plan.phases.find(item => item.id === phaseId);
+    if (!phase) {
+        return { error: `Error: Phase not found: ${phaseId}` };
+    }
+
+    const changeId = deriveChangeId(plan);
+    plan.activeChangeId = changeId;
+    plan.changeIds = Array.from(new Set([...(plan.changeIds || []), changeId]));
+    await manager.savePlan(plan);
+    await ensureChangeArtifact({
+        basePath,
+        changeId,
+        planName: plan.planName || changeId,
+        projectName: plan.projectName,
+    });
+
+    return { plan, changeId, phaseId };
+}
+
+type VerificationExecution = {
+    report: string;
+    passed: boolean;
+    noCommands: boolean;
+    failedAt?: string;
+    gdcApplied: boolean;
+};
+
+async function executeVerification(
+    args: { projectType?: string; verifyMode?: 'quick' | 'full' },
+    basePath: string
+): Promise<VerificationExecution> {
+    const projectType = args.projectType || 'unknown';
+    const mode = args.verifyMode || 'full';
+    const gdcGate = await runGdcVerifyGate(basePath);
+    const sections: string[] = [];
+    if (gdcGate.applied && gdcGate.report) {
+        sections.push(gdcGate.report);
+    }
+    if (!gdcGate.passed) {
+        sections.push(`❌ Verification failed at: ${gdcGate.failedAt || 'GDC Gate'}`);
+        return {
+            report: sections.join('\n\n'),
+            passed: false,
+            noCommands: false,
+            failedAt: gdcGate.failedAt || 'GDC Gate',
+            gdcApplied: gdcGate.applied,
+        };
+    }
+
+    const verification = await runAIVerification({
+        projectType,
+        projectPath: basePath,
+        enablePlaywright: false,
+        enableScreenshots: false,
+        mode,
+    });
+
+    sections.push(generateVerificationReport(verification.results));
+
+    if (verification.results.length === 0) {
+        sections.push([
+            '',
+            '> No verification commands detected for this project.',
+            '> Provide scripts/tools (package.json, go.mod, Cargo.toml, pyproject.toml, *.sln) or pass projectType hint.',
+        ].join('\n'));
+        return {
+            report: sections.join('\n\n'),
+            passed: false,
+            noCommands: true,
+            failedAt: undefined,
+            gdcApplied: gdcGate.applied,
+        };
+    }
+
+    if (!verification.passed) {
+        sections.push([
+            '',
+            `❌ Verification failed at: ${verification.failedAt || 'unknown'}`,
+        ].join('\n'));
+        return {
+            report: sections.join('\n\n'),
+            passed: false,
+            noCommands: false,
+            failedAt: verification.failedAt || 'unknown',
+            gdcApplied: gdcGate.applied,
+        };
+    }
+
+    sections.push([
+        '',
+        '✅ Verification passed.',
+    ].join('\n'));
+    return {
+        report: sections.join('\n\n'),
+        passed: true,
+        noCommands: false,
+        failedAt: undefined,
+        gdcApplied: gdcGate.applied,
+    };
+}
+
+function formatLoopStatus(run: {
+    loopId: string;
+    changeId: string;
+    phaseId: string;
+    status: string;
+    iterationCount: number;
+    maxIterations: number;
+    noProgressCount?: number;
+    maxNoProgress?: number;
+    lastVerifierResult?: string;
+    lastFailureSummary?: string;
+    latestWorkerBriefPath?: string;
+    collaborationSessionId?: string;
+    latestSquadId?: string;
+    latestTaskBundlePath?: string;
+    verifyMode?: string;
+}): string {
+    return [
+        `Loop ID: \`${run.loopId}\``,
+        `Change ID: \`${run.changeId}\``,
+        `Phase ID: \`${run.phaseId}\``,
+        `Status: ${run.status}`,
+        `Iterations: ${run.iterationCount}/${run.maxIterations}`,
+        typeof run.noProgressCount === 'number' && typeof run.maxNoProgress === 'number'
+            ? `No progress: ${run.noProgressCount}/${run.maxNoProgress}`
+            : '',
+        run.lastVerifierResult ? `Last verifier result: ${run.lastVerifierResult}` : '',
+        run.lastFailureSummary ? `Last failure: ${run.lastFailureSummary}` : '',
+        run.latestWorkerBriefPath ? `Latest worker brief: \`${run.latestWorkerBriefPath}\`` : '',
+        run.collaborationSessionId ? `Delegation session: \`${run.collaborationSessionId}\`` : '',
+        run.latestSquadId ? `Latest squad: \`${run.latestSquadId}\`` : '',
+        run.latestTaskBundlePath ? `Latest task bundle: \`${run.latestTaskBundlePath}\`` : '',
+        run.verifyMode ? `Verify mode: ${run.verifyMode}` : '',
+        `Run artifact: \`${toLoopRunPath(run.loopId)}\``,
+    ].filter(Boolean).join('\n');
+}
+
+async function ensureLoopDelegationSession(
+    basePath: string,
+    run: {
+        loopId: string;
+        changeId: string;
+        phaseId: string;
+        collaborationSessionId?: string;
+    }
+): Promise<sharedContext.Session> {
+    const storage = new sharedContext.FileStorageAdapter(path.join(basePath, '.opencode'));
+    if (run.collaborationSessionId) {
+        const existing = await sharedContext.loadSession(storage, run.collaborationSessionId);
+        if (existing) {
+            return existing;
+        }
+    }
+
+    return sharedContext.createSession(storage, {
+        goal: `Weave loop ${run.loopId}: ${run.changeId}/${run.phaseId}`,
+        createdBy: 'weave-loop-controller',
+    });
+}
+
+async function executeLoopAttempt(
+    args: {
+        loopId: string;
+        projectType?: string;
+        verifyMode?: 'quick' | 'full';
+    },
+    basePath: string
+): Promise<string> {
+    const run = await readLoopRun(basePath, args.loopId);
+    if (!run) {
+        return `Error: Loop not found: ${args.loopId}`;
+    }
+
+    if (run.status === 'verified' || run.status === 'failed' || run.status === 'blocked') {
+        return formatLoopStatus(run);
+    }
+
+    if (run.status === 'stopping') {
+        const stopped = await updateLoopRun(basePath, run.loopId, current => ({
+            ...current,
+            status: 'stopped',
+            stoppedAt: current.stoppedAt || new Date().toISOString(),
+        }));
+        if (!stopped) {
+            return `Error: Loop not found: ${args.loopId}`;
+        }
+        await appendLoopEvent(basePath, run.loopId, {
+            type: 'loop_stopped',
+            at: stopped.updatedAt,
+            reason: stopped.stopReason || 'manual stop requested',
+        });
+        return [
+            formatLoopStatus(stopped),
+            '',
+            `Stop reason: ${stopped.stopReason || 'manual stop requested'}`,
+        ].join('\n');
+    }
+
+    const attemptNumber = run.iterationCount + 1;
+    const attemptId = `attempt-${String(attemptNumber).padStart(3, '0')}`;
+
+    await appendLoopEvent(basePath, run.loopId, {
+        type: 'attempt_started',
+        at: new Date().toISOString(),
+        attemptId,
+    });
+
+    const craftOutput = await handleCraft({
+        phaseId: run.phaseId,
+        projectType: args.projectType,
+    }, basePath);
+    if (craftOutput.startsWith('Error:') || craftOutput.startsWith('Plan approval required')) {
+        const blocked = await updateLoopRun(basePath, run.loopId, current => ({
+            ...current,
+            status: 'blocked',
+            iterationCount: attemptNumber,
+            lastAttemptId: attemptId,
+            lastVerifierResult: 'fail',
+            stopReason: craftOutput.split('\n')[0],
+        }));
+        if (!blocked) {
+            return craftOutput;
+        }
+        await appendLoopEvent(basePath, run.loopId, {
+            type: 'attempt_blocked',
+            at: blocked.updatedAt,
+            attemptId,
+            reason: blocked.stopReason,
+        });
+        return [
+            formatLoopStatus(blocked),
+            '',
+            craftOutput,
+        ].join('\n');
+    }
+
+    const verification = await executeVerification({
+        projectType: args.projectType,
+        verifyMode: args.verifyMode || run.verifyMode,
+    }, basePath);
+    const attemptReportPath = await writeLoopAttemptVerificationReport({
+        basePath,
+        changeId: run.changeId,
+        loopId: run.loopId,
+        iteration: attemptNumber,
+        reportMarkdown: verification.report,
+        passed: verification.passed,
+    });
+    await writeChangeVerificationReport({
+        basePath,
+        changeId: run.changeId,
+        reportMarkdown: verification.report,
+        passed: verification.passed,
+    });
+
+    if (verification.passed) {
+        const verified = await updateLoopRun(basePath, run.loopId, current => ({
+            ...current,
+            status: 'verified',
+            iterationCount: attemptNumber,
+            noProgressCount: 0,
+            lastAttemptId: attemptId,
+            lastVerifierResult: 'pass',
+            lastFailureFingerprint: undefined,
+            lastFailureSummary: undefined,
+            latestWorkerBriefPath: undefined,
+            verifyMode: args.verifyMode || current.verifyMode,
+        }));
+        if (!verified) {
+            return `Error: Loop not found: ${args.loopId}`;
+        }
+
+        await appendLoopEvent(basePath, run.loopId, {
+            type: 'attempt_passed',
+            at: verified.updatedAt,
+            attemptId,
+            reportPath: attemptReportPath,
+        });
+
+        const finalizeOutput = await handleApprove({
+            phaseId: run.phaseId,
+            skipVerify: true,
+            source: 'command',
+        }, basePath);
+
+        return [
+            formatLoopStatus(verified),
+            `Attempt report: \`${attemptReportPath}\``,
+            '',
+            verification.report,
+            '',
+            finalizeOutput,
+        ].join('\n');
+    }
+
+    const failureSummary = verification.noCommands
+        ? 'No verification commands detected.'
+        : `Verification failed at ${verification.failedAt || 'verification'}.`;
+    const failureFingerprint = createHash('sha1')
+        .update(verification.noCommands ? 'no-commands' : (verification.failedAt || 'verification'))
+        .digest('hex')
+        .slice(0, 12);
+    const noProgressCount = run.lastFailureFingerprint === failureFingerprint
+        ? run.noProgressCount + 1
+        : 0;
+
+    const manager = getPhaseManager(basePath);
+    const activePlan = await manager.loadPlan();
+    const phase = activePlan?.phases.find(item => item.id === run.phaseId);
+    const focusFiles = Array.from(new Set((phase?.tasks || []).flatMap(task => task.files || []))).slice(0, 6);
+    const nextActionLines = [
+        `Fix the failing verifier target: ${verification.failedAt || 'verification'}.`,
+        focusFiles.length > 0
+            ? `Focus files: ${focusFiles.map(file => `\`${file}\``).join(', ')}`
+            : `Focus phase: ${run.phaseId}. Review the crafted execution plan and touched files.`,
+        `Re-run: weave command=loop-step loopId="${run.loopId}"`,
+    ];
+    const controllerNotes = await writeLoopAttemptControllerNotes({
+        basePath,
+        changeId: run.changeId,
+        loopId: run.loopId,
+        iteration: attemptNumber,
+        failureSummary,
+        noProgressCount,
+        maxNoProgress: run.maxNoProgress,
+        nextActionLines,
+    });
+    const workerBriefPath = await writeLoopAttemptWorkerBrief({
+        basePath,
+        changeId: run.changeId,
+        loopId: run.loopId,
+        iteration: attemptNumber,
+        briefMarkdown: [
+            '# Worker Brief',
+            '',
+            `- Loop ID: \`${run.loopId}\``,
+            `- Phase ID: \`${run.phaseId}\``,
+            `- Attempt: \`${attemptId}\``,
+            '',
+            '## Current Failure',
+            '',
+            `- ${failureSummary}`,
+            '',
+            '## Next Action',
+            '',
+            ...nextActionLines.map(line => `- ${line}`),
+            '',
+            '## Execution Context',
+            '',
+            craftOutput.trim(),
+            '',
+        ].join('\n'),
+    });
+    const { plan: delegationPlan } = await preparePhaseExecution({
+        phaseId: run.phaseId,
+        projectType: args.projectType,
+        onEvent: () => undefined,
+        basePath,
+    });
+    const squadTasks = executionPlanToSquadTasks(delegationPlan);
+    const parallelAnalysis = analyzeParallelOpportunities(delegationPlan);
+    const delegationSession = await ensureLoopDelegationSession(basePath, run);
+    const { spec: delegationSquad } = await sharedContext.createSquad(delegationSession, {
+        mission: `Weave loop ${run.loopId} ${attemptId}`,
+        operator: 'weave-loop-operator',
+        scope: focusFiles.length > 0 ? { files: focusFiles } : undefined,
+        constraints: {
+            maxWorkers: Math.max(1, Math.min(squadTasks.length || 1, 4)),
+        },
+    });
+    const dependencyMap = new Map<string, string>();
+    const assignedTasks: Array<{
+        weaveTaskId: string;
+        taskId: string;
+        assignee: string;
+        priority: string;
+        dependencies: string[];
+    }> = [];
+    for (const squadTask of squadTasks) {
+        const mappedDependencies = (squadTask.dependencies || [])
+            .map(dependency => dependencyMap.get(dependency))
+            .filter((dependency): dependency is string => Boolean(dependency));
+        const assignedTask = await sharedContext.assignTask(delegationSession, delegationSquad.squadId, {
+            assignee: squadTask.assignee,
+            description: `[${run.loopId} ${attemptId}] ${squadTask.description}\nbrief: ${workerBriefPath}`,
+            priority: squadTask.priority,
+            dependencies: mappedDependencies.length > 0 ? mappedDependencies : undefined,
+        });
+        dependencyMap.set(squadTask.taskId, assignedTask.taskId);
+        assignedTasks.push({
+            weaveTaskId: squadTask.taskId,
+            taskId: assignedTask.taskId,
+            assignee: assignedTask.assignee,
+            priority: assignedTask.priority,
+            dependencies: assignedTask.dependencies || [],
+        });
+    }
+    const taskBundlePath = await writeLoopAttemptTaskBundle({
+        basePath,
+        changeId: run.changeId,
+        loopId: run.loopId,
+        iteration: attemptNumber,
+        bundle: {
+            loopId: run.loopId,
+            phaseId: run.phaseId,
+            attemptId,
+            briefPath: workerBriefPath,
+            sessionId: delegationSession.manifest.sessionId,
+            squadId: delegationSquad.squadId,
+            tasks: delegationPlan.taskPlans.map(taskPlan => ({
+                taskId: taskPlan.task.id,
+                name: taskPlan.task.name,
+                assignee: taskPlan.agentTier,
+                mask: taskPlan.mask,
+                complexity: taskPlan.complexity,
+                dependencies: taskPlan.task.dependsOn || [],
+                files: taskPlan.task.files || [],
+                briefPath: workerBriefPath,
+            })),
+            squadTasks,
+            assignedTasks,
+            parallel: {
+                totalWaves: parallelAnalysis.totalWaves,
+                parallelismFactor: parallelAnalysis.parallelismFactor,
+                criticalPath: parallelAnalysis.criticalPath,
+            },
+        },
+    });
+
+    const noProgressExceeded = noProgressCount >= run.maxNoProgress && !verification.noCommands;
+    const nextStatus = verification.noCommands || noProgressExceeded || attemptNumber >= run.maxIterations
+        ? 'blocked'
+        : 'running';
+    const stopReason = nextStatus === 'blocked'
+        ? verification.noCommands
+            ? 'No verification commands detected.'
+            : noProgressExceeded
+                ? `No-progress budget exhausted at ${verification.failedAt || 'verification'}.`
+                : `Retry budget exhausted at ${verification.failedAt || 'verification'}.`
+        : run.stopReason;
+    const next = await updateLoopRun(basePath, run.loopId, current => ({
+        ...current,
+        status: nextStatus,
+        iterationCount: attemptNumber,
+        noProgressCount,
+        lastAttemptId: attemptId,
+        lastVerifierResult: 'fail',
+        lastFailureFingerprint: failureFingerprint,
+        lastFailureSummary: failureSummary,
+        latestWorkerBriefPath: workerBriefPath,
+        collaborationSessionId: delegationSession.manifest.sessionId,
+        latestSquadId: delegationSquad.squadId,
+        latestTaskBundlePath: taskBundlePath,
+        verifyMode: args.verifyMode || current.verifyMode,
+        stopReason,
+    }));
+    if (!next) {
+        return `Error: Loop not found: ${args.loopId}`;
+    }
+
+    await appendLoopEvent(basePath, run.loopId, {
+        type: 'attempt_failed',
+        at: next.updatedAt,
+        attemptId,
+        reportPath: attemptReportPath,
+        summaryPath: controllerNotes.summaryPath,
+        nextActionPath: controllerNotes.nextActionPath,
+        workerBriefPath,
+        taskBundlePath,
+        sessionId: delegationSession.manifest.sessionId,
+        squadId: delegationSquad.squadId,
+        assignedTaskIds: assignedTasks.map(task => task.taskId),
+        failedAt: verification.failedAt || 'verification',
+        status: next.status,
+        noProgressCount,
+    });
+
+    return [
+        formatLoopStatus(next),
+        `Attempt report: \`${attemptReportPath}\``,
+        `Attempt summary: \`${controllerNotes.summaryPath}\``,
+        `Next action: \`${controllerNotes.nextActionPath}\``,
+        `Worker brief: \`${workerBriefPath}\``,
+        `Task bundle: \`${taskBundlePath}\``,
+        next.stopReason ? `Reason: ${next.stopReason}` : '',
+        '',
+        verification.report,
+    ].filter(Boolean).join('\n');
 }
 
 function formatPlanApprovalRequired(
@@ -1016,13 +1641,45 @@ async function handleRefinePlan(
 }
 
 async function handleApprovePlan(
-    args: { planReview?: string; notesPath?: string; applyNotes?: boolean },
+    args: {
+        phaseId?: string;
+        planReview?: string;
+        notesPath?: string;
+        applyNotes?: boolean;
+        projectType?: string;
+        skipVerify?: boolean;
+        verifyMode?: 'quick' | 'full';
+        commit?: boolean;
+        stageAll?: boolean;
+        commitMessage?: string;
+    },
     basePath: string
 ): Promise<string> {
     const manager = getPhaseManager(basePath);
     const activePlan = await manager.loadPlan();
     if (!activePlan) {
         return 'Error: No active plan found. Run `weave prepare docs/` or `weave design docs/` first.';
+    }
+
+    if (args.phaseId) {
+        const phase = activePlan.phases.find(item => item.id === args.phaseId);
+        if (!phase) {
+            return `Error: Phase not found: ${args.phaseId}`;
+        }
+        if (!activePlan.planApproved) {
+            return formatPlanApprovalRequired(basePath, activePlan);
+        }
+
+        return handleApprove({
+            phaseId: args.phaseId,
+            projectType: args.projectType,
+            skipVerify: args.skipVerify,
+            verifyMode: args.verifyMode,
+            commit: args.commit,
+            stageAll: args.stageAll,
+            commitMessage: args.commitMessage,
+            source: 'command',
+        }, basePath);
     }
 
     const autoApplyNotes = args.applyNotes ?? true;
@@ -1157,11 +1814,13 @@ async function handleDesign(
         resetApproval: true,
         approvalNotes: 'Plan created from design. Review and approve before implementation.',
     });
+    const changeArtifact = await ensureActivePlanChangeArtifact(basePath);
 
     return [
         researchResult.summary,
         '',
         planResult.summary,
+        ...(changeArtifact ? ['', `Change artifact: \`${changeArtifact.metadataPath}\``] : []),
         '',
         '---',
         '계획을 검토하고 구현 전에 승인하세요:',
@@ -1253,6 +1912,7 @@ async function handlePrepare(
         resetApproval: true,
         approvalNotes: 'Plan created from prepare. Review and approve before implementation.',
     });
+    const changeArtifact = await ensureActivePlanChangeArtifact(basePath);
 
     const lines: string[] = [];
     lines.push('## ✅ Weave Prepare 완료\n');
@@ -1265,6 +1925,10 @@ async function handlePrepare(
     lines.push(specResult.summary);
     lines.push('');
     lines.push(planResult.summary);
+    if (changeArtifact) {
+        lines.push('');
+        lines.push(`Change artifact: \`${changeArtifact.metadataPath}\``);
+    }
 
     if (intakeResult.questions.length > 0) {
         lines.push('\n---\n');
@@ -1596,11 +2260,17 @@ async function handleCraft(
     const generatedContextPaths = (executionPlan.gdcContextFiles || [])
         .filter(item => item.status === 'generated')
         .map(item => item.path);
+    const generatedChangeContextPaths = (executionPlan.gdcContextFiles || [])
+        .filter(item => item.status === 'generated' && item.changePath)
+        .map(item => item.changePath as string);
     if (generatedContextPaths.length > 0) {
         lines.push('');
         lines.push('### GDC Extract Context');
         lines.push('');
         for (const contextPath of generatedContextPaths.slice(0, 24)) {
+            lines.push(`- \`${contextPath}\``);
+        }
+        for (const contextPath of generatedChangeContextPaths.slice(0, 24)) {
             lines.push(`- \`${contextPath}\``);
         }
     }
@@ -1615,7 +2285,7 @@ async function handleCraft(
 
     await syncWorkflowArtifacts(basePath, manager, {
         phaseId: resolvedPhaseId,
-        contextPaths: generatedContextPaths,
+        contextPaths: [...generatedContextPaths, ...generatedChangeContextPaths],
         reviewLines: [
             `Craft prepared execution context for ${resolvedPhaseId}.`,
             'Legacy auto loop has been removed; proceed with implementation + verification, then approve.',
@@ -1701,6 +2371,17 @@ async function handleStatus(basePath: string): Promise<string> {
         }
         if (activePlan.researchPath) {
             lines.push(`- Research: \`${activePlan.researchPath}\``);
+        }
+        if (activePlan.activeChangeId) {
+            const changeMetadata = await readChangeMetadata(basePath, activePlan.activeChangeId);
+            lines.push(`- Active change: \`${activePlan.activeChangeId}\``);
+            if (changeMetadata) {
+                lines.push(`- Change status: ${changeMetadata.status}`);
+                lines.push(`- Change metadata: \`.opencode/weave/changes/${activePlan.activeChangeId}/metadata.yaml\``);
+            }
+        }
+        if (activePlan.changeIds && activePlan.changeIds.length > 0) {
+            lines.push(`- Known changes: ${activePlan.changeIds.map(changeId => `\`${changeId}\``).join(', ')}`);
         }
         lines.push('');
     }
@@ -1844,52 +2525,22 @@ async function handleVerify(
     args: { projectType?: string; verifyMode?: 'quick' | 'full' },
     basePath: string
 ): Promise<string> {
-    const projectType = args.projectType || 'unknown';
-    const mode = args.verifyMode || 'full';
+    const manager = getPhaseManager(basePath);
+    const activePlan = await manager.loadPlan();
+    const activeChangeId = activePlan?.activeChangeId;
 
-    const gdcGate = await runGdcVerifyGate(basePath);
-    const sections: string[] = [];
-    if (gdcGate.applied && gdcGate.report) {
-        sections.push(gdcGate.report);
-    }
-    if (!gdcGate.passed) {
-        sections.push(`❌ Verification failed at: ${gdcGate.failedAt || 'GDC Gate'}`);
-        return sections.join('\n\n');
-    }
+    const verification = await executeVerification(args, basePath);
 
-    const verification = await runAIVerification({
-        projectType,
-        projectPath: basePath,
-        enablePlaywright: false,
-        enableScreenshots: false,
-        mode,
-    });
-
-    const report = generateVerificationReport(verification.results);
-    sections.push(report);
-
-    if (verification.results.length === 0) {
-        sections.push([
-            '',
-            '> No verification commands detected for this project.',
-            '> Provide scripts/tools (package.json, go.mod, Cargo.toml, pyproject.toml, *.sln) or pass projectType hint.',
-        ].join('\n'));
-        return sections.join('\n\n');
+    if (activeChangeId) {
+        await writeChangeVerificationReport({
+            basePath,
+            changeId: activeChangeId,
+            reportMarkdown: verification.report,
+            passed: verification.passed,
+        });
     }
 
-    if (!verification.passed) {
-        sections.push([
-            '',
-            `❌ Verification failed at: ${verification.failedAt || 'unknown'}`,
-        ].join('\n'));
-        return sections.join('\n\n');
-    }
-
-    sections.push([
-        '',
-        '✅ Verification passed.',
-    ].join('\n'));
-    return sections.join('\n\n');
+    return verification.report;
 }
 
 async function handleTroubleshoot(args: { error?: string; projectType?: string }): Promise<string> {
@@ -1942,6 +2593,695 @@ async function handleRepair(basePath: string): Promise<string> {
     const manager = getPhaseManager(basePath);
     const { results, summary } = await manager.repairPlans();
     return summary;
+}
+
+async function handleArchive(basePath: string): Promise<string> {
+    const manager = getPhaseManager(basePath);
+    const activePlan = await manager.loadPlan();
+    const activeChangeId = activePlan?.activeChangeId;
+
+    if (!activeChangeId) {
+        return 'Error: No active change found. Run `weave prepare` first.';
+    }
+
+    const result = await archiveChange({
+        basePath,
+        changeId: activeChangeId,
+        summaryLines: [
+            `Archived from plan \`${activePlan?.planName || 'active-plan'}\`.`,
+            'Canonical spec sync is pending implementation.',
+        ],
+    });
+
+    if (!result.ok) {
+        return `Error: ${result.reason || `Failed to archive change: ${activeChangeId}`}`;
+    }
+
+    const status = result.alreadyArchived ? 'already archived' : 'archived';
+    return [
+        `Change ${status}: \`${activeChangeId}\``,
+        result.archivePath ? `Archive report: \`${result.archivePath}\`` : '',
+    ].filter(Boolean).join('\n');
+}
+
+async function handleLoopStart(
+    args: {
+        phaseId?: string;
+        projectType?: string;
+        verifyMode?: 'quick' | 'full';
+        loopId?: string;
+        maxIterations?: number;
+        maxNoProgress?: number;
+    },
+    basePath: string
+): Promise<string> {
+    const context = await resolveLoopContext(basePath, args.phaseId);
+    if ('error' in context) {
+        return context.error;
+    }
+
+    const loopId = await resolveLoopId({
+        basePath,
+        changeId: context.changeId,
+        phaseId: context.phaseId.toLowerCase(),
+        loopId: args.loopId,
+    });
+    const maxIterations = args.maxIterations || 1;
+    const maxNoProgress = args.maxNoProgress ?? 1;
+
+    const run = await createLoopRun({
+        basePath,
+        loopId,
+        changeId: context.changeId,
+        phaseId: context.phaseId,
+        verifyMode: args.verifyMode || 'quick',
+        maxIterations,
+        maxNoProgress,
+        status: 'running',
+    });
+    const contractPath = await ensureLoopContract({
+        basePath,
+        changeId: context.changeId,
+        loopId,
+        phaseId: context.phaseId,
+        maxIterations,
+        maxNoProgress,
+    });
+
+    return [
+        formatLoopStatus(run),
+        `Loop contract: \`${contractPath}\``,
+    ].join('\n');
+}
+
+async function handleLoopStep(
+    args: {
+        loopId?: string;
+        projectType?: string;
+        verifyMode?: 'quick' | 'full';
+    },
+    basePath: string
+): Promise<string> {
+    if (!args.loopId) {
+        return 'Error: loopId is required. Use `weave command=loop-list` to inspect runs.';
+    }
+
+    return executeLoopAttempt({
+        loopId: args.loopId,
+        projectType: args.projectType,
+        verifyMode: args.verifyMode,
+    }, basePath);
+}
+
+async function handleLoopRun(
+    args: {
+        phaseId?: string;
+        projectType?: string;
+        verifyMode?: 'quick' | 'full';
+        loopId?: string;
+        maxIterations?: number;
+        maxNoProgress?: number;
+    },
+    basePath: string
+): Promise<string> {
+    const context = await resolveLoopContext(basePath, args.phaseId);
+    if ('error' in context) {
+        return context.error;
+    }
+
+    const loopId = await resolveLoopId({
+        basePath,
+        changeId: context.changeId,
+        phaseId: context.phaseId.toLowerCase(),
+        loopId: args.loopId,
+    });
+    const maxIterations = args.maxIterations || 1;
+    const maxNoProgress = args.maxNoProgress ?? 1;
+
+    const run = await createLoopRun({
+        basePath,
+        loopId,
+        changeId: context.changeId,
+        phaseId: context.phaseId,
+        verifyMode: args.verifyMode || 'quick',
+        maxIterations,
+        maxNoProgress,
+        status: 'running',
+    });
+    await ensureLoopContract({
+        basePath,
+        changeId: context.changeId,
+        loopId,
+        phaseId: context.phaseId,
+        maxIterations,
+        maxNoProgress,
+    });
+
+    let latestOutput = formatLoopStatus(run);
+
+    for (let index = 0; index < maxIterations; index += 1) {
+        latestOutput = await handleLoopStep({
+            loopId,
+            projectType: args.projectType,
+            verifyMode: args.verifyMode || 'quick',
+        }, basePath);
+
+        const run = await readLoopRun(basePath, loopId);
+        if (!run || ['verified', 'blocked', 'failed', 'stopped'].includes(run.status)) {
+            break;
+        }
+    }
+
+    return latestOutput;
+}
+
+async function handleLoopStatus(
+    args: { loopId?: string },
+    basePath: string
+): Promise<string> {
+    if (!args.loopId) {
+        return 'Error: loopId is required. Use `weave command=loop-list` to inspect runs.';
+    }
+
+    const run = await readLoopRun(basePath, args.loopId);
+    if (!run) {
+        return `Error: Loop not found: ${args.loopId}`;
+    }
+
+    return formatLoopStatus(run);
+}
+
+async function handleLoopStop(
+    args: { loopId?: string; context?: string },
+    basePath: string
+): Promise<string> {
+    if (!args.loopId) {
+        return 'Error: loopId is required. Use `weave command=loop-list` to inspect runs.';
+    }
+
+    const run = await requestLoopStop({
+        basePath,
+        loopId: args.loopId,
+        reason: args.context,
+    });
+    if (!run) {
+        return `Error: Loop not found: ${args.loopId}`;
+    }
+
+    return [
+        `Stop requested for loop \`${args.loopId}\``,
+        '',
+        formatLoopStatus(run),
+    ].join('\n');
+}
+
+async function handleLoopList(basePath: string): Promise<string> {
+    const runs = await listLoopRuns(basePath);
+    if (runs.length === 0) {
+        return 'No loop runs found.';
+    }
+
+    const lines: string[] = ['## Loop Runs', ''];
+    for (const run of runs) {
+        lines.push(`- \`${run.loopId}\` | ${run.status} | ${run.changeId} | ${run.phaseId} | ${run.iterationCount}/${run.maxIterations}`);
+    }
+    return lines.join('\n');
+}
+
+type LoopSyncOutcome =
+    | { kind: 'error'; output: string }
+    | { kind: 'no_delegation'; output: string }
+    | { kind: 'missing'; output: string }
+    | { kind: 'waiting'; output: string; completedTasks: number; totalTasks: number }
+    | { kind: 'failed'; output: string }
+    | { kind: 'synced'; output: string };
+
+async function syncLoopDelegation(
+    args: {
+        loopId: string;
+        projectType?: string;
+        verifyMode?: 'quick' | 'full';
+    },
+    basePath: string
+): Promise<LoopSyncOutcome> {
+    const run = await readLoopRun(basePath, args.loopId);
+    if (!run) {
+        return { kind: 'error', output: `Error: Loop not found: ${args.loopId}` };
+    }
+    if (!run.collaborationSessionId || !run.latestSquadId) {
+        return {
+            kind: 'no_delegation',
+            output: [
+                formatLoopStatus(run),
+                '',
+                'No delegated squad is linked to this loop run.',
+            ].join('\n'),
+        };
+    }
+
+    const storage = new sharedContext.FileStorageAdapter(path.join(basePath, '.opencode'));
+    const session = await sharedContext.loadSession(storage, run.collaborationSessionId);
+    if (!session) {
+        return {
+            kind: 'missing',
+            output: [
+                formatLoopStatus(run),
+                '',
+                `Delegation session not found: ${run.collaborationSessionId}`,
+            ].join('\n'),
+        };
+    }
+
+    const squad = await sharedContext.getSquad(session, run.latestSquadId);
+    if (!squad) {
+        return {
+            kind: 'missing',
+            output: [
+                formatLoopStatus(run),
+                '',
+                `Delegated squad not found: ${run.latestSquadId}`,
+            ].join('\n'),
+        };
+    }
+
+    const totalTasks = squad.state.tasks.length;
+    const completedTasks = squad.state.tasks.filter(task => task.status === 'completed').length;
+    const failedTasks = squad.state.tasks.filter(task => task.status === 'failed').length;
+    const activeTasks = squad.state.tasks.filter(task => task.status === 'active' || task.status === 'pending' || task.status === 'paused').length;
+
+    const summaryLines = [
+        `Delegation session: \`${run.collaborationSessionId}\``,
+        `Delegated squad: \`${run.latestSquadId}\``,
+        `Task status: ${completedTasks}/${totalTasks} completed, ${failedTasks} failed, ${activeTasks} active`,
+    ];
+
+    if (failedTasks > 0) {
+        const blocked = await updateLoopRun(basePath, run.loopId, current => ({
+            ...current,
+            status: 'blocked',
+            stopReason: 'Delegated squad contains failed tasks.',
+        }));
+        if (!blocked) {
+            return { kind: 'error', output: `Error: Loop not found: ${args.loopId}` };
+        }
+        await appendLoopEvent(basePath, run.loopId, {
+            type: 'delegation_failed',
+            at: blocked.updatedAt,
+            squadId: run.latestSquadId,
+        });
+        return {
+            kind: 'failed',
+            output: [
+                formatLoopStatus(blocked),
+                '',
+                ...summaryLines,
+            ].join('\n'),
+        };
+    }
+
+    if (activeTasks > 0) {
+        return {
+            kind: 'waiting',
+            completedTasks,
+            totalTasks,
+            output: [
+                formatLoopStatus(run),
+                '',
+                ...summaryLines,
+            ].join('\n'),
+        };
+    }
+
+    const resumed = await updateLoopRun(basePath, run.loopId, current => ({
+        ...current,
+        status: 'running',
+        noProgressCount: 0,
+        stopReason: undefined,
+    }));
+    if (!resumed) {
+        return { kind: 'error', output: `Error: Loop not found: ${args.loopId}` };
+    }
+    await appendLoopEvent(basePath, run.loopId, {
+        type: 'delegation_completed',
+        at: resumed.updatedAt,
+        squadId: run.latestSquadId,
+        sessionId: run.collaborationSessionId,
+    });
+
+    const resumedOutput = await executeLoopAttempt({
+        loopId: run.loopId,
+        projectType: args.projectType,
+        verifyMode: args.verifyMode || run.verifyMode,
+    }, basePath);
+
+    return {
+        kind: 'synced',
+        output: [
+            'Delegated work completed. Resuming loop verification.',
+            '',
+            ...summaryLines,
+            '',
+            resumedOutput,
+        ].join('\n'),
+    };
+}
+
+async function handleLoopSync(
+    args: {
+        loopId?: string;
+        projectType?: string;
+        verifyMode?: 'quick' | 'full';
+    },
+    basePath: string
+): Promise<string> {
+    if (!args.loopId) {
+        return 'Error: loopId is required. Use `weave command=loop-list` to inspect runs.';
+    }
+    const result = await syncLoopDelegation({
+        loopId: args.loopId,
+        projectType: args.projectType,
+        verifyMode: args.verifyMode,
+    }, basePath);
+    return result.output;
+}
+
+async function handleLoopWatchdog(
+    args: {
+        loopId?: string;
+        projectType?: string;
+        verifyMode?: 'quick' | 'full';
+    },
+    basePath: string
+): Promise<string> {
+    const runs = args.loopId
+        ? [await readLoopRun(basePath, args.loopId)].filter((run): run is NonNullable<Awaited<ReturnType<typeof readLoopRun>>> => Boolean(run))
+        : await listLoopRuns(basePath);
+
+    if (runs.length === 0) {
+        return args.loopId
+            ? `Error: Loop not found: ${args.loopId}`
+            : 'No loop runs found.';
+    }
+
+    const candidates = runs.filter(run =>
+        Boolean(run.collaborationSessionId && run.latestSquadId)
+        && !['verified', 'failed', 'stopped'].includes(run.status)
+    );
+    if (candidates.length === 0) {
+        return 'No delegated loop runs require watchdog polling.';
+    }
+
+    const syncedOutputs: string[] = [];
+    let waitingCount = 0;
+    let failedCount = 0;
+
+    for (const run of candidates) {
+        const result = await syncLoopDelegation({
+            loopId: run.loopId,
+            projectType: args.projectType,
+            verifyMode: args.verifyMode,
+        }, basePath);
+        if (result.kind === 'synced') {
+            syncedOutputs.push(result.output);
+        } else if (result.kind === 'waiting') {
+            waitingCount += 1;
+        } else if (result.kind === 'failed') {
+            failedCount += 1;
+            syncedOutputs.push(result.output);
+        }
+    }
+
+    return [
+        '## Loop Watchdog',
+        '',
+        `Scanned: ${candidates.length}`,
+        `Synced: ${syncedOutputs.filter(output => output.startsWith('Delegated work completed')).length}`,
+        `Failed: ${failedCount}`,
+        `Waiting: ${waitingCount}`,
+        syncedOutputs.length > 0 ? '' : '',
+        ...syncedOutputs,
+    ].filter(Boolean).join('\n');
+}
+
+async function handleLoopPoll(
+    args: {
+        loopId?: string;
+        projectType?: string;
+        verifyMode?: 'quick' | 'full';
+        pollIntervalMs?: number;
+        pollCycles?: number;
+    },
+    basePath: string
+): Promise<string> {
+    const pollIntervalMs = args.pollIntervalMs ?? 1000;
+    const pollCycles = args.pollCycles ?? 30;
+    let lastOutput = '';
+
+    for (let cycle = 1; cycle <= pollCycles; cycle += 1) {
+        if (args.loopId) {
+            const result = await syncLoopDelegation({
+                loopId: args.loopId,
+                projectType: args.projectType,
+                verifyMode: args.verifyMode,
+            }, basePath);
+            lastOutput = result.output;
+            if (result.kind === 'synced' || result.kind === 'failed' || result.kind === 'error') {
+                return [
+                    `Loop poll completed in ${cycle} cycles.`,
+                    '',
+                    result.output,
+                ].join('\n');
+            }
+        } else {
+            const watchdogOutput = await handleLoopWatchdog({
+                projectType: args.projectType,
+                verifyMode: args.verifyMode,
+            }, basePath);
+            lastOutput = watchdogOutput;
+            if (/Synced: [1-9]/.test(watchdogOutput) || /Failed: [1-9]/.test(watchdogOutput)) {
+                return [
+                    `Loop poll completed in ${cycle} cycles.`,
+                    '',
+                    watchdogOutput,
+                ].join('\n');
+            }
+        }
+
+        if (cycle < pollCycles) {
+            await sleep(pollIntervalMs);
+        }
+    }
+
+    return [
+        `Loop poll timed out after ${pollCycles} cycles.`,
+        '',
+        lastOutput || 'No delegated loop runs require polling.',
+    ].join('\n');
+}
+
+async function handleLoopOperator(
+    args: {
+        loopId?: string;
+        projectType?: string;
+        verifyMode?: 'quick' | 'full';
+        pollIntervalMs?: number;
+        pollCycles?: number;
+    },
+    basePath: string
+): Promise<string> {
+    const pollIntervalMs = args.pollIntervalMs ?? 1000;
+    const pollCycles = args.pollCycles ?? 30;
+    const operatorId = toKebabCase([
+        'loop-operator',
+        args.loopId || 'all',
+        Date.now().toString(36),
+    ].join('-'));
+    const lock = await acquireLoopOperatorLock({
+        basePath,
+        operatorId,
+    });
+    if (!lock.acquired) {
+        return [
+            'Loop operator is already active.',
+            lock.activeOperatorId ? `Active operator: \`${lock.activeOperatorId}\`` : '',
+            lock.updatedAt ? `Updated at: ${lock.updatedAt}` : '',
+            `Lock artifact: \`${toLoopOperatorStatePath()}\``,
+        ].filter(Boolean).join('\n');
+    }
+
+    const startedAt = new Date().toISOString();
+    let syncedCount = 0;
+    let failedCount = 0;
+    let waitingCount = 0;
+    let lastSummary = 'No delegated loop runs were scanned yet.';
+    let completedCycles = 0;
+    let finalStatus: 'running' | 'idle' | 'completed' | 'timed_out' | 'blocked' = 'running';
+    const outputSections: string[] = [];
+
+    try {
+        for (let cycle = 1; cycle <= pollCycles; cycle += 1) {
+            completedCycles = cycle;
+            await refreshLoopOperatorLock({ basePath, operatorId });
+
+            const runs = args.loopId
+                ? [await readLoopRun(basePath, args.loopId)].filter((run): run is NonNullable<Awaited<ReturnType<typeof readLoopRun>>> => Boolean(run))
+                : await listLoopRuns(basePath);
+            if (args.loopId && runs.length === 0) {
+                finalStatus = 'blocked';
+                lastSummary = `Loop not found: ${args.loopId}`;
+                await writeLoopOperatorState(basePath, {
+                    operatorId,
+                    status: finalStatus,
+                    startedAt,
+                    updatedAt: new Date().toISOString(),
+                    finishedAt: new Date().toISOString(),
+                    targetLoopId: args.loopId,
+                    pollIntervalMs,
+                    pollCycles,
+                    lastCycle: cycle,
+                    syncedCount,
+                    failedCount,
+                    waitingCount,
+                    lastSummary,
+                });
+                return `Error: Loop not found: ${args.loopId}`;
+            }
+
+            const candidates = runs.filter(run =>
+                Boolean(run.collaborationSessionId && run.latestSquadId)
+                && !['verified', 'failed', 'stopped'].includes(run.status)
+            );
+
+            if (candidates.length === 0) {
+                finalStatus = cycle === 1 ? 'idle' : 'completed';
+                lastSummary = 'No delegated loop runs require operator polling.';
+                await writeLoopOperatorState(basePath, {
+                    operatorId,
+                    status: finalStatus,
+                    startedAt,
+                    updatedAt: new Date().toISOString(),
+                    finishedAt: new Date().toISOString(),
+                    targetLoopId: args.loopId,
+                    pollIntervalMs,
+                    pollCycles,
+                    lastCycle: cycle,
+                    syncedCount,
+                    failedCount,
+                    waitingCount,
+                    lastSummary,
+                });
+                return [
+                    '## Loop Operator',
+                    '',
+                    `Operator ID: \`${operatorId}\``,
+                    `Status: ${finalStatus}`,
+                    `Cycles: ${cycle}/${pollCycles}`,
+                    `Synced: ${syncedCount}`,
+                    `Failed: ${failedCount}`,
+                    `Waiting: ${waitingCount}`,
+                    `State artifact: \`${toLoopOperatorStatePath()}\``,
+                    '',
+                    lastSummary,
+                ].join('\n');
+            }
+
+            let cycleSynced = 0;
+            let cycleFailed = 0;
+            let cycleWaiting = 0;
+            const cycleOutputs: string[] = [];
+
+            for (const run of candidates) {
+                const result = await syncLoopDelegation({
+                    loopId: run.loopId,
+                    projectType: args.projectType,
+                    verifyMode: args.verifyMode,
+                }, basePath);
+
+                if (result.kind === 'synced') {
+                    cycleSynced += 1;
+                    cycleOutputs.push(result.output);
+                } else if (result.kind === 'failed') {
+                    cycleFailed += 1;
+                    cycleOutputs.push(result.output);
+                } else if (result.kind === 'waiting') {
+                    cycleWaiting += 1;
+                } else if (result.kind === 'error' || result.kind === 'missing') {
+                    cycleFailed += 1;
+                    cycleOutputs.push(result.output);
+                }
+            }
+
+            syncedCount += cycleSynced;
+            failedCount += cycleFailed;
+            waitingCount = cycleWaiting;
+            lastSummary = `Cycle ${cycle}: synced ${cycleSynced}, failed ${cycleFailed}, waiting ${cycleWaiting}.`;
+            if (cycleOutputs.length > 0) {
+                outputSections.push(...cycleOutputs);
+            }
+
+            await writeLoopOperatorState(basePath, {
+                operatorId,
+                status: 'running',
+                startedAt,
+                updatedAt: new Date().toISOString(),
+                targetLoopId: args.loopId,
+                pollIntervalMs,
+                pollCycles,
+                lastCycle: cycle,
+                syncedCount,
+                failedCount,
+                waitingCount,
+                lastSummary,
+            });
+
+            if (cycleWaiting === 0) {
+                finalStatus = cycleFailed > 0 ? 'blocked' : 'completed';
+                break;
+            }
+
+            if (cycle < pollCycles) {
+                await sleep(pollIntervalMs);
+            }
+        }
+
+        if (finalStatus === 'running') {
+            finalStatus = 'timed_out';
+        }
+
+        await writeLoopOperatorState(basePath, {
+            operatorId,
+            status: finalStatus,
+            startedAt,
+            updatedAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+            targetLoopId: args.loopId,
+            pollIntervalMs,
+            pollCycles,
+            lastCycle: completedCycles,
+            syncedCount,
+            failedCount,
+            waitingCount,
+            lastSummary,
+        });
+
+        return [
+            '## Loop Operator',
+            '',
+            `Operator ID: \`${operatorId}\``,
+            `Status: ${finalStatus}`,
+            `Cycles: ${completedCycles}/${pollCycles}`,
+            `Synced: ${syncedCount}`,
+            `Failed: ${failedCount}`,
+            `Waiting: ${waitingCount}`,
+            `State artifact: \`${toLoopOperatorStatePath()}\``,
+            '',
+            lastSummary,
+            outputSections.length > 0 ? '' : '',
+            ...outputSections,
+        ].filter(Boolean).join('\n');
+    } finally {
+        await releaseLoopOperatorLock({ basePath, operatorId });
+    }
 }
 
 async function maybeAdvanceToNextShard(
@@ -2173,6 +3513,7 @@ async function handleApprove(
         ].filter(Boolean) as string[]);
     }
 
+    await phaseManager.markAllTasksPassed(resolvedPhaseId);
     const result = await handleUserResponse(resolvedPhaseId, 'approve', undefined, basePath);
     const shardSwitch = await maybeAdvanceToNextShard(phaseManager, basePath);
     return finalizeApprove([
@@ -2208,13 +3549,24 @@ To check installed version:
   | \`weave spec [docs]\` | Generate baseline spec (requirements + AC) |
   | \`weave prepare [docs]\` | Create spec + phase plan (auto-splits oversized plans) |
   | \`weave refine-plan\` | Apply structured plan-note directives to active plan |
-  | \`weave approve-plan\` | Mark plan approved before implementation |
+  | \`weave approve-plan\` | Approve plan, or finalize a phase with \`phaseId\` |
   | \`weave flow [docs]\` | One-command path (prepare -> auto-approve -> craft -> verify -> finalize) |
   | \`weave design [docs]\` | Analyze requirements and create phase plan (auto-splits oversized plans) |
   | \`weave craft [id]\` | Prepare execution context for a phase |
   | \`weave status\` | View progress |
   | \`weave worktree ...\` | Manage git worktrees for parallel work |
   | \`weave verify\` | Run build/test verification for current worktree |
+  | \`weave archive\` | Archive the verified active change artifact |
+  | \`weave loop-run\` | Create and execute a bounded loop for the active change |
+  | \`weave loop-start\` | Create a loop run without executing it |
+  | \`weave loop-step\` | Execute one loop iteration for an existing loopId |
+  | \`weave loop-status\` | Inspect a loop run by loopId |
+  | \`weave loop-stop\` | Request a semantic stop for a loop run |
+  | \`weave loop-list\` | List known loop runs |
+  | \`weave loop-sync\` | Pull delegated squad results back into a loop run |
+  | \`weave loop-watchdog\` | Scan delegated loops and auto-sync completed runs |
+  | \`weave loop-poll\` | Bounded wait loop for delegated completion |
+  | \`weave loop-operator\` | Recurring operator run with state + lock artifacts |
   | \`weave repair\` | Scan and auto-repair corrupted plan YAML files |
   | \`weave troubleshoot [error]\` | Search global knowledge for solutions |
   | \`weave record [solution]\` | Record a new solution |
@@ -2234,8 +3586,16 @@ weave init                                               # Initialize weave + pr
 weave prepare docs/                                      # Research + spec + plan
 weave refine-plan                                        # Apply plan-notes directives (optional)
 weave approve-plan                                       # Explicit approval gate
+weave approve-plan phaseId="P1"                          # Finalize crafted phase P1
 weave flow                                               # One-shot: prepare/approve/craft/verify/finalize
 weave craft                                              # Prepare current phase execution context
+weave loop-run                                           # Run bounded loop for the active change
+weave loop-status loopId="docs-p1-loop-r1"               # Inspect a specific loop run
+weave loop-sync loopId="docs-p1-loop-r1"                 # Resume after delegated workers finish
+weave loop-watchdog                                      # Scan all delegated loops once
+weave loop-poll loopId="docs-p1-loop-r1"                 # Wait for delegated completion and resume automatically
+weave loop-operator                                      # Automation-friendly recurring operator pass
+weave archive                                            # Archive verified active change
 \`\`\`
 `;
 }
@@ -2311,10 +3671,14 @@ async function syncWorkflowArtifacts(
 
         const todoPath = path.join(tasksDir, 'todo.md');
         const lines: string[] = [];
-        const currentPhaseId = options.phaseId
-            || plan.currentPhase
-            || plan.phases.find(phase => phase.status === 'in_progress')?.id
-            || plan.phases.find(phase => phase.status !== 'completed')?.id;
+        const requestedPhase = options.phaseId
+            ? plan.phases.find(phase => phase.id === options.phaseId)
+            : undefined;
+        const currentPhaseId = requestedPhase && requestedPhase.status !== 'completed'
+            ? requestedPhase.id
+            : plan.currentPhase
+                || plan.phases.find(phase => phase.status === 'in_progress')?.id
+                || plan.phases.find(phase => phase.status !== 'completed')?.id;
 
         lines.push('# Todo');
         lines.push('');
@@ -2360,6 +3724,10 @@ function sanitizeLessonText(input: string, maxLength = 240): string {
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, maxLength);
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function appendWorkflowLesson(

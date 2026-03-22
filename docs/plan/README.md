@@ -1,7 +1,16 @@
-# Weave x GDC Plan Docs
+# Weave Planning Docs
 
-이 폴더는 Maskweaver의 Weave 워크플로우에 GDC를 통합하기 위한 설계 문서를 담습니다.
+This folder collects planning and implementation docs for Maskweaver's `weave` workflow.
 
-- `weave-gdc-integration-plan.ko.md`: 통합 아키텍처와 단계별 실행 계획
-- `gdc-machine-contract-v1.ko.md`: GDC 머신 출력(JSON) 표준 계약(M0)
-- `weave-gdc-file-change-map.ko.md`: 파일 단위 구현 백로그와 테스트 계획
+## Current Design Docs
+
+- `weave-gdc-integration-plan.ko.md`: base integration direction between Weave and GDC
+- `weave-change-artifact-gdc-integration-plan.ko.md`: change artifact model and Weave/GDC integration design
+- `weave-bounded-loop-integration-plan.ko.md`: bounded loop design for change-scoped iterative execution
+- `gdc-machine-contract-v1.ko.md`: GDC machine output contract
+- `weave-gdc-file-change-map.ko.md`: current file-level implementation map
+
+## Initiative Folders
+
+- `weave-change-artifact-gdc/`: execution-ready docs for the change artifact initiative
+- `weave-bounded-loop/`: execution-ready docs for the bounded loop initiative

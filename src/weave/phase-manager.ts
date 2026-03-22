@@ -78,6 +78,12 @@ function serializePlan(plan: WeavePlan): string {
     if (plan.nextPlanName) {
         lines.push(`next_plan_name: ${yamlEscapeString(plan.nextPlanName)}`);
     }
+    if (plan.activeChangeId) {
+        lines.push(`active_change_id: ${yamlEscapeString(plan.activeChangeId)}`);
+    }
+    if (plan.changeIds && plan.changeIds.length > 0) {
+        lines.push(`change_ids: [${plan.changeIds.map(changeId => yamlEscapeString(changeId)).join(', ')}]`);
+    }
     lines.push(`project_name: ${yamlEscapeString(plan.projectName)}`);
     lines.push(`created_at: ${yamlEscapeString(plan.createdAt)}`);
     lines.push(`updated_at: ${yamlEscapeString(plan.updatedAt)}`);
@@ -161,6 +167,9 @@ function serializePlan(plan: WeavePlan): string {
             }
             if (task.nodeIds && task.nodeIds.length > 0) {
                 lines.push(`        node_ids: [${task.nodeIds.map(nodeId => yamlEscapeString(nodeId)).join(', ')}]`);
+            }
+            if (task.changeRefs && task.changeRefs.length > 0) {
+                lines.push(`        change_refs: [${task.changeRefs.map(changeRef => yamlEscapeString(changeRef)).join(', ')}]`);
             }
             if (task.files && task.files.length > 0) {
                 lines.push(`        files: [${task.files.map(file => yamlEscapeString(file)).join(', ')}]`);
@@ -669,6 +678,8 @@ export class PhaseManager {
             shardIndex: raw.shard_index || raw.shardIndex,
             shardTotal: raw.shard_total || raw.shardTotal,
             nextPlanName: raw.next_plan_name || raw.nextPlanName,
+            activeChangeId: raw.active_change_id || raw.activeChangeId,
+            changeIds: raw.change_ids || raw.changeIds,
             projectName: raw.project_name || raw.projectName || 'Unknown',
             createdAt: raw.created_at || raw.createdAt || new Date().toISOString(),
             updatedAt: raw.updated_at || raw.updatedAt || new Date().toISOString(),
@@ -694,6 +705,7 @@ export class PhaseManager {
                     status: t.status || 'pending',
                     testCase: t.test_case || t.testCase,
                     nodeIds: t.node_ids || t.nodeIds,
+                    changeRefs: t.change_refs || t.changeRefs,
                     files: t.files,
                     dependsOn: t.depends_on || t.dependsOn,
                     verify: t.verify,

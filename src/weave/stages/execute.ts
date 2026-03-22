@@ -17,7 +17,7 @@ import { searchTroubleshooting, recordTroubleshooting } from '../knowledge/globa
 import { analyzeParallelOpportunities, formatParallelAnalysis } from '../bridge.js';
 import { spawn } from 'node:child_process';
 import * as path from 'node:path';
-import { mkdir } from 'node:fs/promises';
+import { copyFile, mkdir } from 'node:fs/promises';
 import {
     checkPlaywrightSetup,
     runPlaywrightTests,
@@ -28,6 +28,7 @@ import {
 
 import { recommendVerificationCommands } from '../verification/commands.js';
 import { getEffectiveGdcConfig, runGdcMachineCommand } from '../gdc.js';
+import { toChangeContextPath } from '../change-artifacts.js';
 
 // ============================================================================
 // Types
@@ -83,6 +84,7 @@ function normalizePath(p: string): string {
 async function collectGdcExtractContexts(
     basePath: string,
     phase: WeavePhase,
+    changeId?: string,
 ): Promise<PhaseExecutionPlan['gdcContextFiles']> {
     const gdc = getEffectiveGdcConfig(basePath);
     if (!gdc.enabled) return [];
@@ -90,6 +92,12 @@ async function collectGdcExtractContexts(
     const contexts: NonNullable<PhaseExecutionPlan['gdcContextFiles']> = [];
     const contextDir = path.join(basePath, 'tasks', 'context');
     await mkdir(contextDir, { recursive: true });
+    const changeContextDir = changeId
+        ? path.join(basePath, '.opencode', 'weave', 'changes', changeId, 'context')
+        : null;
+    if (changeContextDir) {
+        await mkdir(changeContextDir, { recursive: true });
+    }
 
     for (const task of phase.tasks) {
         const nodeIds = (task.nodeIds || []).slice(0, 6);
@@ -101,6 +109,8 @@ async function collectGdcExtractContexts(
             const fileName = `${task.id}-${sanitizeNodeToken(nodeId)}.md`;
             const outputPathAbs = path.join(contextDir, fileName);
             const outputPathRel = normalizePath(path.relative(basePath, outputPathAbs));
+            const changePathAbs = changeContextDir ? path.join(changeContextDir, fileName) : null;
+            const changePathRel = changeId ? toChangeContextPath(changeId, fileName) : undefined;
 
             const args: string[] = [];
             if (gdc.extractContext.withImpl) args.push('--with-impl');
@@ -117,10 +127,14 @@ async function collectGdcExtractContexts(
             });
 
             if (result.exitCode === 0) {
+                if (changePathAbs) {
+                    await copyFile(outputPathAbs, changePathAbs);
+                }
                 contexts.push({
                     taskId: task.id,
                     nodeId,
                     path: outputPathRel,
+                    changePath: changePathRel,
                     status: 'generated',
                 });
             } else {
@@ -128,6 +142,7 @@ async function collectGdcExtractContexts(
                     taskId: task.id,
                     nodeId,
                     path: outputPathRel,
+                    changePath: changePathRel,
                     status: 'failed',
                     note: result.transportError || result.parseError || `exit=${result.exitCode}`,
                 });
@@ -186,7 +201,7 @@ export async function preparePhaseExecution(options: ExecuteOptions): Promise<Pr
 
     // Generate execution plan with mask + agent tier per task
     const executionPlan = await orchestrator.generateExecutionPlan(phase, { projectType });
-    executionPlan.gdcContextFiles = await collectGdcExtractContexts(runtimeBasePath, phase);
+    executionPlan.gdcContextFiles = await collectGdcExtractContexts(runtimeBasePath, phase, plan?.activeChangeId);
 
     return {
         plan: executionPlan,
@@ -258,7 +273,8 @@ export function formatExecutionPlan(plan: PhaseExecutionPlan): string {
         lines.push('');
 
         for (const item of generated.slice(0, 24)) {
-            lines.push(`- [${item.taskId}] \`${item.nodeId}\` -> \`${item.path}\``);
+            const suffix = item.changePath ? ` | change: \`${item.changePath}\`` : '';
+            lines.push(`- [${item.taskId}] \`${item.nodeId}\` -> \`${item.path}\`${suffix}`);
         }
 
         if (failed.length > 0) {

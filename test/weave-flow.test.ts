@@ -36,6 +36,21 @@ function seedDocs(worktree: string): void {
   );
 }
 
+function seedPassingNodeProject(worktree: string): void {
+  writeFileSync(
+    join(worktree, 'package.json'),
+    JSON.stringify({
+      name: 'weave-verify-fixture',
+      version: '1.0.0',
+      scripts: {
+        build: 'node -e "process.exit(0)"',
+        test: 'node -e "process.exit(0)"',
+      },
+    }, null, 2),
+    'utf-8',
+  );
+}
+
 function seedLargeDocs(worktree: string): string {
   const docsDir = join(worktree, 'docs-large');
   mkdirSync(docsDir, { recursive: true });
@@ -190,7 +205,21 @@ describe('Weave Flow Command', () => {
     expect(p1).not.toBeNull();
     expect(p1?.status).toBe('completed');
     expect(p1?.tasks.length).toBeGreaterThan(0);
+    expect(p1?.tasks.every(task => task.status === 'passed')).toBe(true);
     expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
+  }, 20000);
+
+  test('flow finalization advances todo focus to the next incomplete phase', async () => {
+    const tool = createWeaveTool();
+
+    await tool.execute(
+      { command: 'flow', docsPath: 'docs' },
+      { worktree: tempDir },
+    );
+
+    const todo = readFileSync(join(tempDir, 'tasks', 'todo.md'), 'utf-8');
+    expect(todo).toContain('- Focus phase: `P2`');
+    expect(todo).not.toContain('- Focus phase: `P1`');
   }, 20000);
 
   test('flow continues in one-shot mode even when plan gate fails', async () => {
@@ -381,6 +410,8 @@ describe('Weave Flow Command', () => {
     expect(output).toContain('### GDC Status');
     expect(output).toContain('Detected: yes');
     expect(output).toContain('Node specs:');
+    expect(output).toContain('- Active change: `docs`');
+    expect(output).toContain('- Known changes: `docs`');
   }, 20000);
 
   test('prepare runs GDC sync when autoSyncOnPrepare is enabled', async () => {
@@ -394,6 +425,38 @@ describe('Weave Flow Command', () => {
 
     expect(output).toContain('### GDC Prepare Sync');
     expect(output).toContain('- sync: PASS');
+  }, 20000);
+
+  test('prepare creates an active change artifact linked to the plan', async () => {
+    const tool = createWeaveTool();
+
+    await tool.execute(
+      { command: 'prepare', docsPath: 'docs' },
+      { worktree: tempDir },
+    );
+
+    const manager = getPhaseManager(tempDir);
+    const plan = await manager.loadPlan();
+    expect(plan).not.toBeNull();
+    expect(plan?.activeChangeId).toBe('docs');
+    expect(plan?.changeIds).toContain('docs');
+
+    const changeDir = join(tempDir, '.opencode', 'weave', 'changes', 'docs');
+    expect(existsSync(changeDir)).toBe(true);
+
+    const metadataPath = join(changeDir, 'metadata.yaml');
+    expect(existsSync(metadataPath)).toBe(true);
+
+    const metadata = readFileSync(metadataPath, 'utf-8');
+    expect(metadata).toContain('change_id: docs');
+    expect(metadata).toContain('status: active');
+    expect(metadata).toContain('plan_name: docs');
+
+    expect(existsSync(join(changeDir, 'proposal.md'))).toBe(true);
+    expect(existsSync(join(changeDir, 'design.md'))).toBe(true);
+    expect(existsSync(join(changeDir, 'tasks.md'))).toBe(true);
+    expect(existsSync(join(changeDir, 'verify.md'))).toBe(true);
+    expect(existsSync(join(changeDir, 'archive.md'))).toBe(true);
   }, 20000);
 
   test('prepare creates gdc-aware task metadata when graph is available', async () => {
@@ -413,6 +476,7 @@ describe('Weave Flow Command', () => {
     expect(p1).not.toBeNull();
     expect(p1?.tasks.length).toBeGreaterThan(0);
     expect((p1?.tasks[0]?.nodeIds || []).length).toBeGreaterThan(0);
+    expect(p1?.tasks.every(task => (task.changeRefs || []).includes('docs'))).toBe(true);
     expect((p1?.tasks[1]?.dependsOn || [])[0]).toBe('P1-T1');
     expect((p1?.tasks[2]?.dependsOn || [])[0]).toBe('P1-T2');
     expect((p1?.tasks[0]?.verify || []).length).toBeGreaterThan(0);
@@ -574,8 +638,8 @@ describe('Weave Flow Command', () => {
     await manager.loadPlan();
     const p1 = manager.getPhase('P1');
     expect(p1).not.toBeNull();
-    expect(p1?.tasks[0]?.status).toBe('pending');
-    expect(p1?.tasks[1]?.status).toBe('pending');
+    expect(p1?.tasks[0]?.status).toBe('passed');
+    expect(p1?.tasks[1]?.status).toBe('passed');
     expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
   }, 20000);
 
@@ -639,6 +703,38 @@ describe('Weave Flow Command', () => {
     expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
   }, 30000);
 
+  test('approve-plan with phaseId finalizes the crafted phase', async () => {
+    const tool = createWeaveTool();
+
+    await tool.execute(
+      { command: 'prepare', docsPath: 'docs' },
+      { worktree: tempDir },
+    );
+    await tool.execute(
+      { command: 'approve-plan' },
+      { worktree: tempDir },
+    );
+    await tool.execute(
+      { command: 'craft', phaseId: 'P1' },
+      { worktree: tempDir },
+    );
+
+    const output = await tool.execute(
+      { command: 'approve-plan', phaseId: 'P1' },
+      { worktree: tempDir },
+    );
+
+    expect(output).toContain('AI Verification Results');
+    expect(output).toContain('Phase P1');
+
+    const manager = getPhaseManager(tempDir);
+    await manager.loadPlan();
+    const phase = manager.getPhase('P1');
+    expect(phase).not.toBeNull();
+    expect(phase?.status).toBe('completed');
+    expect(phase?.tasks.every(task => task.status === 'passed')).toBe(true);
+  }, 30000);
+
   test('craft generates gdc extract context files for linked nodes', async () => {
     seedMockGdcConfig(tempDir, 'clean', { autoSyncOnPrepare: true });
 
@@ -659,13 +755,59 @@ describe('Weave Flow Command', () => {
 
     expect(output).toContain('### GDC Context Files');
     expect(output).toContain('### GDC Extract Context');
+    expect(output).toContain('.opencode/weave/changes/docs/context/');
 
     const contextDir = join(tempDir, 'tasks', 'context');
     expect(existsSync(contextDir)).toBe(true);
     const contextFiles = readdirSync(contextDir).filter(name => name.endsWith('.md'));
     expect(contextFiles.length).toBeGreaterThan(0);
 
+    const changeContextDir = join(tempDir, '.opencode', 'weave', 'changes', 'docs', 'context');
+    expect(existsSync(changeContextDir)).toBe(true);
+    const changeContextFiles = readdirSync(changeContextDir).filter(name => name.endsWith('.md'));
+    expect(changeContextFiles.length).toBeGreaterThan(0);
+
     const todo = readFileSync(join(tempDir, 'tasks', 'todo.md'), 'utf-8');
     expect(todo).toContain('## GDC Context');
+  }, 30000);
+
+  test('verify records report into the active change and marks it verified', async () => {
+    seedPassingNodeProject(tempDir);
+
+    const tool = createWeaveTool();
+    await tool.execute(
+      { command: 'prepare', docsPath: 'docs' },
+      { worktree: tempDir },
+    );
+    await tool.execute(
+      { command: 'approve-plan' },
+      { worktree: tempDir },
+    );
+    await tool.execute(
+      { command: 'craft', phaseId: 'P1' },
+      { worktree: tempDir },
+    );
+
+    const output = await tool.execute(
+      { command: 'verify', verifyMode: 'quick' },
+      { worktree: tempDir },
+    );
+
+    expect(output).toContain('Verification passed');
+
+    const verifyReport = readFileSync(
+      join(tempDir, '.opencode', 'weave', 'changes', 'docs', 'verify.md'),
+      'utf-8',
+    );
+    expect(verifyReport).toContain('# Verify');
+    expect(verifyReport).toContain('## Report');
+    expect(verifyReport).toContain('## AI Verification Results');
+    expect(verifyReport).toContain('Verification passed');
+
+    const metadata = readFileSync(
+      join(tempDir, '.opencode', 'weave', 'changes', 'docs', 'metadata.yaml'),
+      'utf-8',
+    );
+    expect(metadata).toContain('status: verified');
   }, 30000);
 });

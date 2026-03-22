@@ -172,6 +172,23 @@ function copyGdcNodesRecursive(srcDir: string, destDir: string): void {
     }
 }
 
+function copyDirectoryRecursive(srcDir: string, destDir: string): void {
+    if (!fs.existsSync(srcDir)) return;
+    fs.mkdirSync(destDir, { recursive: true });
+    const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+    for (const entry of entries) {
+        const src = path.join(srcDir, entry.name);
+        const dest = path.join(destDir, entry.name);
+        if (entry.isDirectory()) {
+            copyDirectoryRecursive(src, dest);
+            continue;
+        }
+        if (!entry.isFile()) continue;
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.copyFileSync(src, dest);
+    }
+}
+
 export function bootstrapWeaveArtifacts(fromRoot: string, toRoot: string): void {
     ensureIgnoreOverride(toRoot);
     ensureWeaveState(toRoot);
@@ -188,6 +205,10 @@ export function bootstrapWeaveArtifacts(fromRoot: string, toRoot: string): void 
     copyYamlDirIfExists(
         path.join(fromRoot, '.opencode', 'weave', 'specs'),
         path.join(toRoot, '.opencode', 'weave', 'specs')
+    );
+    copyDirectoryRecursive(
+        path.join(fromRoot, '.opencode', 'weave', 'changes'),
+        path.join(toRoot, '.opencode', 'weave', 'changes')
     );
 }
 

@@ -31,6 +31,7 @@ export interface WeaveTask {
     status: 'pending' | 'in_progress' | 'passed' | 'failed';
     testCase?: string;             // Expected test case
     nodeIds?: string[];            // Linked GDC node IDs
+    changeRefs?: string[];         // Linked change artifact IDs
     files?: string[];              // Primary file targets for this task
     dependsOn?: string[];          // Task-level dependencies inside a phase
     verify?: Array<{
@@ -73,6 +74,7 @@ export interface PhaseExecutionPlan {
         taskId: string;
         nodeId: string;
         path: string;
+        changePath?: string;
         status: 'generated' | 'skipped' | 'failed';
         note?: string;
     }>;
@@ -82,6 +84,67 @@ export interface PhaseExecutionPlan {
 // ============================================================================
 // Plan Types
 // ============================================================================
+
+export interface WeaveChangeMetadata {
+    changeId: string;
+    planName: string;
+    projectName: string;
+    status: 'active' | 'verified' | 'archived';
+    createdAt: string;
+    updatedAt: string;
+    verifiedAt?: string;
+    archivedAt?: string;
+    proposalPath: string;
+    designPath: string;
+    tasksPath: string;
+    verifyPath: string;
+    archivePath: string;
+}
+
+export type WeaveLoopStatus = 'running' | 'stopping' | 'stopped' | 'blocked' | 'verified' | 'failed';
+
+export interface WeaveLoopRun {
+    loopId: string;
+    changeId: string;
+    phaseId: string;
+    status: WeaveLoopStatus;
+    createdAt: string;
+    updatedAt: string;
+    startedAt?: string;
+    stoppedAt?: string;
+    stopReason?: string;
+    maxIterations: number;
+    iterationCount: number;
+    maxNoProgress: number;
+    noProgressCount: number;
+    lastAttemptId?: string;
+    lastVerifierResult?: 'pass' | 'fail';
+    lastFailureFingerprint?: string;
+    lastFailureSummary?: string;
+    latestWorkerBriefPath?: string;
+    collaborationSessionId?: string;
+    latestSquadId?: string;
+    latestTaskBundlePath?: string;
+    verifyMode?: 'quick' | 'full';
+}
+
+export type WeaveLoopOperatorStatus = 'running' | 'idle' | 'completed' | 'timed_out' | 'blocked';
+
+export interface WeaveLoopOperatorState {
+    operatorId: string;
+    status: WeaveLoopOperatorStatus;
+    startedAt: string;
+    updatedAt: string;
+    finishedAt?: string;
+    targetLoopId?: string;
+    pollIntervalMs: number;
+    pollCycles: number;
+    lastCycle: number;
+    syncedCount: number;
+    failedCount: number;
+    waitingCount: number;
+    lastSummary?: string;
+}
 
 export interface WeavePlan {
     /**
@@ -116,6 +179,8 @@ export interface WeavePlan {
     shardIndex?: number;
     shardTotal?: number;
     nextPlanName?: string;
+    activeChangeId?: string;
+    changeIds?: string[];
 
     phases: WeavePhase[];
     currentPhase?: string;

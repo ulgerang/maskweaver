@@ -15,6 +15,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { VERSION } from "../version.js";
 import { runDoctor, printDoctorReport } from "./doctor.js";
+import { writeDefaultRuntimeConfig, writeDefaultPluginConfig } from "../shared/generate-agents.js";
 
 // ============================================================================
 // Constants
@@ -187,6 +188,30 @@ async function installPlugin(options: { local?: boolean; tui?: boolean }) {
     // Save config
     writeConfig(configPath, config);
 
+    let createdRuntimeConfig = false;
+    let createdPluginConfig = false;
+
+    // Auto-create local maskweaver.config.json if not exists
+    if (isLocal) {
+      const runtimeCreated = writeDefaultRuntimeConfig(process.cwd());
+      if (runtimeCreated) {
+        createdRuntimeConfig = true;
+        info(`maskweaver.config.json not found — created default: ${runtimeCreated}`);
+      }
+      const pluginCreated = writeDefaultPluginConfig(process.cwd());
+      if (pluginCreated) {
+        createdPluginConfig = true;
+        info(`.opencode/maskweaver.json not found — created default: ${pluginCreated}`);
+      }
+    }
+
+    if (createdRuntimeConfig) {
+      log("");
+      log(`📝 다음 단계:`, "yellow");
+      log(`  maskweaver.config.json에 모델 이름을 설정한 후`, "dim");
+      log(`  OpenCode 내에서 \`weave sync-agents\`를 실행하세요.`, "dim");
+    }
+
     success(`플러그인이 성공적으로 설치되었습니다!`);
     log("");
     log(`📦 설치된 플러그인: ${PLUGIN_NAME}`, "bright");
@@ -194,7 +219,10 @@ async function installPlugin(options: { local?: boolean; tui?: boolean }) {
     log("");
     log(`다음 단계:`, "bright");
     log(`  1. OpenCode를 재시작하세요`, "dim");
-    log(`  2. /maskweaver 명령으로 가면을 선택하세요`, "dim");
+    if (!isLocal) {
+      log(`  2. 프로젝트에서 \`maskweaver install --local\` 을 실행하세요`, "dim");
+    }
+    log(`  3. /maskweaver 명령으로 가면을 선택하세요`, "dim");
     log("");
   } catch (err) {
     error(`설치 중 오류가 발생했습니다.`);

@@ -75,31 +75,49 @@ const DEFAULT_GLOBAL_CONFIG_TEMPLATE = {
   dummyHumans: {
     pool: [
       {
-        id: 'flash',
-        model: '',
+        id: 'deepseek-flash',
+        model: 'opencode-go/deepseek-v4-flash',
         tier: 'flash',
         maxConcurrent: 5,
         capabilities: ['search', 'formatting', 'simple-coding', 'file-ops'],
         costTier: 'low',
-        description: 'Fast and cheap model for simple tasks (e.g., google/gemini-2.5-flash)',
+        description: 'DeepSeek V4 Flash - 빠름. 단순 검색/포매팅/파일작업',
       },
       {
-        id: 'human',
-        model: '',
+        id: 'deepseek-general',
+        model: 'opencode-go/deepseek-v4-flash',
         tier: 'human',
         maxConcurrent: 3,
-        capabilities: ['coding', 'testing', 'refactoring'],
+        capabilities: ['coding', 'testing', 'refactoring', 'backend'],
         costTier: 'medium',
-        description: 'Balanced model for general coding (e.g., anthropic/claude-sonnet-4)',
+        description: 'DeepSeek V4 Flash - 일반. 코딩/리팩토링/백엔드',
       },
       {
-        id: 'premium',
-        model: '',
+        id: 'qwen-vision',
+        model: 'opencode-go/qwen3.6-plus',
+        tier: 'human',
+        maxConcurrent: 3,
+        capabilities: ['vision', 'frontend', 'testing'],
+        costTier: 'medium',
+        description: 'Qwen 3.6 Plus - 비전. 이미지 분석/프론트엔드/테스트',
+      },
+      {
+        id: 'deepseek-pro',
+        model: 'opencode-go/deepseek-v4-pro',
         tier: 'premium',
         maxConcurrent: 2,
-        capabilities: ['architecture', 'debugging', 'reasoning', 'complex-coding'],
+        capabilities: ['architecture', 'debugging', 'reasoning', 'complex-coding', 'refactoring'],
         costTier: 'high',
-        description: 'Powerful model for complex reasoning (e.g., anthropic/claude-opus-4)',
+        description: 'DeepSeek V4 Pro - 고급 추론. 아키텍처/복잡 디버깅',
+      },
+      {
+        id: 'kimi-vision',
+        model: 'opencode-go/kimi-k2.6',
+        tier: 'premium',
+        maxConcurrent: 2,
+        capabilities: ['vision', 'reasoning', 'complex-coding', 'architecture', 'debugging'],
+        costTier: 'high',
+        description: 'Kimi K2.6 - 비전 고급. 이미지 분석/복잡 추론',
       },
     ],
   },
@@ -160,7 +178,7 @@ function main() {
   const created = ensureGlobalConfig();
   if (created) {
     console.log(`✓ 글로벌 설정 파일 생성됨: ~/.config/opencode/maskweaver.config.json`);
-    console.log(`  모델을 설정한 후, 프로젝트에서 \`weave sync-agents\`를 실행하세요.`);
+    console.log(`  프로젝트에서 \`weave sync-agents\`를 실행하세요.`);
   }
 }
 

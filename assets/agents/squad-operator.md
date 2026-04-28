@@ -177,8 +177,12 @@ squad({ action: "models" })
    - 단순 작업 (파일 정리, 포매팅) → flash 티어 모델
    - 일반 코딩 → human 티어 모델
    - 복잡한 설계/디버깅 → premium 티어 모델
+   - **비전 필요 (이미지 분석, 스크린샷) → `vision` capability 보유 모델 선택**
+     - `qwen-vision` (human 티어) 또는 `kimi-vision` (premium 티어)
+     - `squad({ action: "models" })` 결과에서 `capabilities`에 `"vision"`이 포함된 모델 확인
 3. **동시실행 고려**: 해당 모델의 `remainingSlots`이 0이면 다른 모델 사용
 4. **fallback**: 원하는 티어가 꽉 찼으면 비슷한 능력의 다른 모델 사용
+5. **비전 fallback**: vision 모델이 모두 사용 중이면 일반 모델로 작업을 분리하여 처리 (이미지 설명 생성 → 일반 코딩 모델에 전달)
 
 ### assignee 지정 방식
 `assignee` 필드에 **에이전트 이름**을 사용합니다:

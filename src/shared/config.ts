@@ -183,15 +183,29 @@ export interface RuntimeMemoryConfig {
  * Runtime GDC integration configuration from maskweaver.config.json
  */
 export interface RuntimeGdcConfig {
-  enabled?: boolean | "auto";
-  binPath?: string;
+  enabled?: boolean | 'auto';
   strictVerify?: boolean;
+  binPath?: string;
   autoSyncOnPrepare?: boolean;
   extractContext?: {
     withImpl?: boolean;
     withTests?: boolean;
     withCallers?: boolean;
   };
+}
+
+export interface RuntimeOperatorConfig {
+  model: string;
+  maxConcurrent?: number;
+  description?: string;
+}
+
+export interface RuntimeConfig {
+  dummyHumans?: DummyHumansConfig;
+  operator?: RuntimeOperatorConfig;
+  memory?: RuntimeMemoryConfig;
+  gdc?: RuntimeGdcConfig;
+  language?: string;
 }
 
 // ============================================================================
@@ -352,6 +366,14 @@ export function getMemoryProviderConfig(basePath: string = process.cwd()): Runti
 export function getGdcConfig(basePath: string = process.cwd()): RuntimeGdcConfig | undefined {
   const config = loadRuntimeConfig(basePath);
   return config.gdc;
+}
+
+/**
+ * Get operator model configuration from runtime config
+ */
+export function getOperatorConfig(basePath: string = process.cwd()): RuntimeOperatorConfig | undefined {
+  const config = loadRuntimeConfig(basePath);
+  return config.operator;
 }
 
 /**

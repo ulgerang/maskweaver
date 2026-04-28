@@ -859,7 +859,20 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory, project, wor
   }
 
   // ==========================================================================
-  // 2b. Generate pool agents from maskweaver.config.json (dummyHumans.pool)
+  // 2b. Auto-create default config files if they don't exist (BEFORE agents)
+  // ==========================================================================
+  const createdRuntimeConfig = writeDefaultRuntimeConfig(directory);
+  if (createdRuntimeConfig) {
+    pluginLog(client, 'info', `Created default runtime config: ${path.relative(directory, createdRuntimeConfig)}`);
+  }
+
+  const createdPluginConfig = writeDefaultPluginConfig(directory);
+  if (createdPluginConfig) {
+    pluginLog(client, 'info', `Created default plugin config: ${path.relative(directory, createdPluginConfig)}`);
+  }
+
+  // ==========================================================================
+  // 2c. Generate pool agents from maskweaver.config.json (dummyHumans.pool)
   // ==========================================================================
   const generatedAgents = generatePoolAgents(directory);
   if (generatedAgents.length > 0) {
@@ -867,18 +880,9 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory, project, wor
     pluginLog(client, 'warn', `⚠️ RESTART REQUIRED: Please restart OpenCode to activate the new pool agent files.`);
   }
 
-  // ==========================================================================
-  // 2c. Auto-create default config files if they don't exist
-  // ==========================================================================
-  const createdRuntimeConfig = writeDefaultRuntimeConfig(directory);
-  if (createdRuntimeConfig) {
-    pluginLog(client, 'info', `Created default runtime config: ${path.relative(directory, createdRuntimeConfig)}`);
-    pluginLog(client, 'warn', `⚠️ Edit maskweaver.config.json to add your model names in the dummyHumans.pool, then run \`weave sync-agents\` to generate agent files.`);
-  }
-
-  const createdPluginConfig = writeDefaultPluginConfig(directory);
-  if (createdPluginConfig) {
-    pluginLog(client, 'info', `Created default plugin config: ${path.relative(directory, createdPluginConfig)}`);
+  // If config was just created but pool has no agents, warn user
+  if (createdRuntimeConfig && generatedAgents.length === 0) {
+    pluginLog(client, 'warn', `⚠️ maskweaver.config.json was created. Edit it to configure your model pool, then restart OpenCode.`);
   }
 
   // ==========================================================================

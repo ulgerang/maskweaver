@@ -255,6 +255,11 @@ export const DEFAULT_RUNTIME_CONFIG_TEMPLATE = {
       },
     ],
   },
+  operator: {
+    model: 'opencode-go/deepseek-v4-pro',
+    maxConcurrent: 2,
+    description: 'Squad Operator model - 작업 오케스트레이션 및 고급 추론',
+  },
   memory: {
     provider: 'text-only',
     enabled: false,

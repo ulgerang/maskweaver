@@ -2,7 +2,9 @@
 // Runs after npm install to verify OpenCode compatibility
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MIN_OPENCODE_VERSION = "1.0.0";
@@ -69,6 +71,68 @@ function getPackageVersion() {
   }
 }
 
+const DEFAULT_GLOBAL_CONFIG_TEMPLATE = {
+  dummyHumans: {
+    pool: [
+      {
+        id: 'flash',
+        model: '',
+        tier: 'flash',
+        maxConcurrent: 5,
+        capabilities: ['search', 'formatting', 'simple-coding', 'file-ops'],
+        costTier: 'low',
+        description: 'Fast and cheap model for simple tasks (e.g., google/gemini-2.5-flash)',
+      },
+      {
+        id: 'human',
+        model: '',
+        tier: 'human',
+        maxConcurrent: 3,
+        capabilities: ['coding', 'testing', 'refactoring'],
+        costTier: 'medium',
+        description: 'Balanced model for general coding (e.g., anthropic/claude-sonnet-4)',
+      },
+      {
+        id: 'premium',
+        model: '',
+        tier: 'premium',
+        maxConcurrent: 2,
+        capabilities: ['architecture', 'debugging', 'reasoning', 'complex-coding'],
+        costTier: 'high',
+        description: 'Powerful model for complex reasoning (e.g., anthropic/claude-opus-4)',
+      },
+    ],
+  },
+  memory: {
+    provider: 'text-only',
+    enabled: false,
+  },
+  language: 'ko',
+};
+
+function ensureGlobalConfig() {
+  const globalDir = join(homedir(), '.config', 'opencode');
+  const globalConfigPath = join(globalDir, 'maskweaver.config.json');
+
+  if (existsSync(globalConfigPath)) {
+    return false;
+  }
+
+  try {
+    if (!existsSync(globalDir)) {
+      mkdirSync(globalDir, { recursive: true });
+    }
+    writeFileSync(
+      globalConfigPath,
+      JSON.stringify(DEFAULT_GLOBAL_CONFIG_TEMPLATE, null, 2) + '\n',
+      'utf-8'
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function main() {
   const pkgVersion = getPackageVersion();
   const versionCheck = checkOpenCodeVersion();
@@ -92,6 +156,12 @@ function main() {
   }
 
   console.log(`  maskweaver install 로 플러그인을 등록하세요.`);
+
+  const created = ensureGlobalConfig();
+  if (created) {
+    console.log(`✓ 글로벌 설정 파일 생성됨: ~/.config/opencode/maskweaver.config.json`);
+    console.log(`  모델을 설정한 후, 프로젝트에서 \`weave sync-agents\`를 실행하세요.`);
+  }
 }
 
 main();

@@ -10,6 +10,7 @@ import { z } from 'zod';
 const tool = <T>(input: T): T => input;
 
 import { createHash } from 'node:crypto';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
@@ -1554,6 +1555,17 @@ async function handleInit(basePath: string): Promise<string> {
 
     lines.push('');
     lines.push(...gdcReport);
+    lines.push('');
+    // Check global config
+    const globalConfigPath = path.join(os.homedir(), '.config', 'opencode', 'maskweaver.config.json');
+    if (!fs.existsSync(globalConfigPath)) {
+        lines.push('');
+        lines.push('### ⚠️ 글로벌 설정 파일 없음');
+        lines.push('`~/.config/opencode/maskweaver.config.json` 파일이 없습니다.');
+        lines.push('실행: `weave init-config` 로 기본 설정 파일을 생성하세요.');
+        lines.push('또는 수동으로 생성한 후 `weave sync-agents` 를 실행하세요.');
+    }
+
     lines.push('');
     lines.push('다음 단계:');
     lines.push('- `weave command=prepare docsPath="docs/"` (권장)');

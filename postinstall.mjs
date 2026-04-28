@@ -153,6 +153,16 @@ function ensureGlobalConfig() {
 
 function main() {
   const pkgVersion = getPackageVersion();
+
+  // Always create global config — regardless of OpenCode detection
+  const created = ensureGlobalConfig();
+  if (created) {
+    console.log(`✓ maskweaver v${pkgVersion}: 글로벌 설정 파일 생성됨`);
+    console.log(`  → ~/.config/opencode/maskweaver.config.json`);
+    console.log(`  편집 후 프로젝트에서 \`weave sync-agents\`를 실행하세요`);
+    console.log('');
+  }
+
   const versionCheck = checkOpenCodeVersion();
 
   if (versionCheck.ok === null) {
@@ -174,12 +184,6 @@ function main() {
   }
 
   console.log(`  maskweaver install 로 플러그인을 등록하세요.`);
-
-  const created = ensureGlobalConfig();
-  if (created) {
-    console.log(`✓ 글로벌 설정 파일 생성됨: ~/.config/opencode/maskweaver.config.json`);
-    console.log(`  프로젝트에서 \`weave sync-agents\`를 실행하세요.`);
-  }
 }
 
 main();

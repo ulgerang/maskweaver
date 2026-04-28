@@ -859,16 +859,22 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory, project, wor
   }
 
   // ==========================================================================
-  // 2b. Auto-create default config files if they don't exist (BEFORE agents)
+  // 2b. Auto-create default config files (global first, then project)
   // ==========================================================================
+  const globalConfigDir = path.join(os.homedir(), '.config', 'opencode');
+  const createdGlobalConfig = writeDefaultRuntimeConfig(globalConfigDir);
+  if (createdGlobalConfig) {
+    pluginLog(client, 'info', `Created global config: ${path.relative(os.homedir(), createdGlobalConfig)}`);
+  }
+
   const createdRuntimeConfig = writeDefaultRuntimeConfig(directory);
   if (createdRuntimeConfig) {
-    pluginLog(client, 'info', `Created default runtime config: ${path.relative(directory, createdRuntimeConfig)}`);
+    pluginLog(client, 'info', `Created project config: ${path.relative(directory, createdRuntimeConfig)}`);
   }
 
   const createdPluginConfig = writeDefaultPluginConfig(directory);
   if (createdPluginConfig) {
-    pluginLog(client, 'info', `Created default plugin config: ${path.relative(directory, createdPluginConfig)}`);
+    pluginLog(client, 'info', `Created plugin config: ${path.relative(directory, createdPluginConfig)}`);
   }
 
   // ==========================================================================
@@ -880,7 +886,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory, project, wor
     pluginLog(client, 'warn', `⚠️ RESTART REQUIRED: Please restart OpenCode to activate the new pool agent files.`);
   }
 
-  // If config was just created but pool has no agents, warn user
+  // If project config was just created but pool has no agents, warn user
   if (createdRuntimeConfig && generatedAgents.length === 0) {
     pluginLog(client, 'warn', `⚠️ maskweaver.config.json was created. Edit it to configure your model pool, then restart OpenCode.`);
   }

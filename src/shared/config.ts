@@ -1,5 +1,6 @@
 import type { LogLevel } from "./types.js";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 /**
@@ -295,11 +296,12 @@ let cachedRuntimeConfig: RuntimeConfig | null = null;
 let cachedConfigPath: string | null = null;
 
 /**
- * Load maskweaver.config.json from project root
+ * Load maskweaver.config.json from project root or global config
  * 
  * Searches in order:
  * 1. {basePath}/maskweaver.config.json
  * 2. {basePath}/.opencode/maskweaver.config.json
+ * 3. ~/.config/opencode/maskweaver.config.json (global fallback)
  */
 export function loadRuntimeConfig(basePath: string = process.cwd()): RuntimeConfig {
   // Return cached config if same path
@@ -310,6 +312,7 @@ export function loadRuntimeConfig(basePath: string = process.cwd()): RuntimeConf
   const locations = [
     path.join(basePath, "maskweaver.config.json"),
     path.join(basePath, ".opencode", "maskweaver.config.json"),
+    path.join(os.homedir(), ".config", "opencode", "maskweaver.config.json"),
   ];
   
   for (const location of locations) {

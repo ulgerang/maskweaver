@@ -80,7 +80,9 @@ Maskweaver의 Phase-Driven Development 워크플로우입니다.
 | \`weave flow [docs]\` | prepare -> auto-approve -> craft -> verify -> finalize |
 | \`weave status\` | 진행 상황 확인 |
 | \`weave help\` | 이 도움말 |
-
+| \`weave sync-agents\` | 설정 파일 기준으로 더미 에이전트 파일 강제 재생성 |
+| \`weave init-config\` | 기본 설정 파일(maskweaver.config.json) 생성 |
+ 
 **Note**: weave 도구를 직접 호출할 수도 있습니다: \`weave command=design docsPath=docs/\`
 `,
     },
@@ -331,6 +333,8 @@ export function createSlashcommandTool() {
 - /weave craft [phaseId] - Prepare phase execution context
 - /weave status - View progress
 - /weave repair - Scan and auto-repair corrupted plan YAML files
+- /weave sync-agents - Force regenerate dummy agent files from config pool
+- /weave init-config - Create default config files with pool template
 
 Use command="list" to see all available commands.`,
 
@@ -374,7 +378,7 @@ Use command="list" to see all available commands.`,
                 if (helpCmd) {
                     return helpCmd.content || 'Weave help content not available.';
                 }
-            } else if (['init', 'status', 'design', 'prepare', 'refine-plan', 'flow', 'craft', 'research', 'approve-plan', 'help', 'repair'].includes(cmdName)) {
+            } else if (['init', 'status', 'design', 'prepare', 'refine-plan', 'flow', 'craft', 'research', 'approve-plan', 'help', 'repair', 'sync-agents', 'init-config'].includes(cmdName)) {
                 // Shorthand: "status" -> "weave-status"
                 const weaveCmd = commands.find(c => c.name === `weave-${cmdName}`);
                 if (weaveCmd) {

@@ -44,6 +44,12 @@ import { createSquadTool } from './tools/squad.js';
 import { createWeaveTool } from './tools/weave.js';
 import { createSlashcommandTool } from './tools/slashcommand.js';
 import { loadRuntimeConfig, normalizeDummyHumansConfig } from '../shared/config.js';
+import {
+  generatePoolAgentFiles,
+  generatePoolAgentFilesFromConfig,
+  writeDefaultRuntimeConfig,
+  writeDefaultPluginConfig,
+} from '../shared/generate-agents.js';
 
 // ============================================================================
 // Asset Installer
@@ -183,69 +189,21 @@ function installAssets(projectDir: string): InstallResult {
 /**
  * Generate dummy-human agent .md files from maskweaver.config.json's dummyHumans.pool.
  * 
- * For each entry in the pool, creates .opencode/agents/dummy-{id}.md with the
- * model field set to the pool entry's model. This ensures the squad system's
- * model pool and the actual agent files stay in sync.
+ * For each pool entry with a non-empty model, creates .opencode/agents/dummy-{id}.md.
+ * Skips existing files to protect user customizations — use `weave sync-agents`
+ * to force overwrite from the config.
  * 
- * Skips existing files to protect user customizations.
+ * Also skips entries with empty model names (template placeholders) to prevent
+ * generating broken agent files.
  */
 function generatePoolAgents(projectDir: string): string[] {
-  const generated: string[] = [];
+  const agentsDir = path.join(projectDir, '.opencode', 'agents');
+  
+  // Use shared utility — force=false means skip existing
+  const result = generatePoolAgentFilesFromConfig(projectDir, agentsDir, { force: false });
 
-  // Read runtime config
-  const config = loadRuntimeConfig(projectDir);
-  if (!config.dummyHumans) {
-    return generated; // No pool configured, nothing to generate
-  }
-
-  const pool = normalizeDummyHumansConfig(config.dummyHumans);
-  if (pool.length === 0) {
-    return generated;
-  }
-
-  const agentsDest = path.join(projectDir, '.opencode', 'agents');
-  if (!fs.existsSync(agentsDest)) {
-    try {
-      fs.mkdirSync(agentsDest, { recursive: true });
-    } catch {
-      return generated; // Cannot create directory, skip silently
-    }
-  }
-
-  for (const entry of pool) {
-    const agentName = `dummy-${entry.id}`;
-    const agentPath = path.join(agentsDest, `${agentName}.md`);
-
-    // Skip if already exists (protect user customizations)
-    if (fs.existsSync(agentPath)) {
-      continue;
-    }
-
-    const content = [
-      '---',
-      `description: "Dummy-Human (${entry.id}) - Auto-generated from maskweaver.config.json pool"`,
-      `model: ${entry.model}`,
-      'mode: subagent',
-      'temperature: 0.2',
-      'permission:',
-      '  edit: allow',
-      '  bash: allow',
-      '  webfetch: allow',
-      '---',
-      '',
-      'Faithfully executes instructions from Mask Weaver.',
-      '',
-    ].join('\n');
-
-    try {
-      fs.writeFileSync(agentPath, content, 'utf-8');
-      generated.push(agentPath);
-    } catch (e) {
-      // Skip files that fail to write
-    }
-  }
-
-  return generated;
+  // Extract successfully created files (not skipped, not updated)
+  return result.created;
 }
 
 // ============================================================================
@@ -907,6 +865,20 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory, project, wor
   if (generatedAgents.length > 0) {
     pluginLog(client, 'info', `Generated ${generatedAgents.length} pool agent files from maskweaver.config.json: ${generatedAgents.map(p => path.basename(p)).join(', ')}`);
     pluginLog(client, 'warn', `⚠️ RESTART REQUIRED: Please restart OpenCode to activate the new pool agent files.`);
+  }
+
+  // ==========================================================================
+  // 2c. Auto-create default config files if they don't exist
+  // ==========================================================================
+  const createdRuntimeConfig = writeDefaultRuntimeConfig(directory);
+  if (createdRuntimeConfig) {
+    pluginLog(client, 'info', `Created default runtime config: ${path.relative(directory, createdRuntimeConfig)}`);
+    pluginLog(client, 'warn', `⚠️ Edit maskweaver.config.json to add your model names in the dummyHumans.pool, then run \`weave sync-agents\` to generate agent files.`);
+  }
+
+  const createdPluginConfig = writeDefaultPluginConfig(directory);
+  if (createdPluginConfig) {
+    pluginLog(client, 'info', `Created default plugin config: ${path.relative(directory, createdPluginConfig)}`);
   }
 
   // ==========================================================================

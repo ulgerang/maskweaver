@@ -56,3 +56,18 @@ export {
   isLLMCompatible,
   createImageDataUrl,
 } from "./image.js";
+
+// Agent generation from pool config
+export {
+  generatePoolAgentFiles,
+  generatePoolAgentFilesFromConfig,
+  writeDefaultRuntimeConfig,
+  writeDefaultPluginConfig,
+  findUserGlobalConfig,
+  DEFAULT_RUNTIME_CONFIG_TEMPLATE,
+  DEFAULT_PLUGIN_CONFIG_TEMPLATE,
+} from "./generate-agents.js";
+export type {
+  GenerateAgentsResult,
+  GenerateAgentsOptions,
+} from "./generate-agents.js";

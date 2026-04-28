@@ -67,6 +67,11 @@ import {
     countGdcCheckIssues,
     getStatsNodeSummary,
 } from '../../weave/gdc.js';
+import {
+    generatePoolAgentFilesFromConfig,
+    writeDefaultRuntimeConfig,
+    writeDefaultPluginConfig,
+} from '../../shared/generate-agents.js';
 
 // ============================================================================
 // Tool Factory
@@ -102,6 +107,8 @@ Commands:
 - troubleshoot [error]: Search global knowledge for solutions
 - record [solution]: Record a troubleshooting solution
 - repair: Scan and auto-repair corrupted plan YAML files
+- sync-agents: Force regenerate dummy-human agent .md files from maskweaver.config.json pool (reads project config first, falls back to ~/.config/opencode/maskweaver.config.json)
+- init-config: Create default maskweaver.config.json with pool template (does not overwrite existing)
 
 Examples:
 - weave init
@@ -114,10 +121,12 @@ Examples:
 - weave loop-status loopId="docs-p1-loop-r1"
 - weave status
 - weave repair
+- weave sync-agents
+- weave init-config
 - weave troubleshoot "Cannot find module 'xyz'"`,
 
         args: {
-            command: z.enum(['init', 'research', 'spec', 'design', 'prepare', 'refine-plan', 'approve-plan', 'flow', 'craft', 'status', 'worktree', 'verify', 'archive', 'loop-run', 'loop-start', 'loop-step', 'loop-status', 'loop-stop', 'loop-list', 'loop-sync', 'loop-watchdog', 'loop-poll', 'loop-operator', 'troubleshoot', 'record', 'help', 'repair'])
+            command: z.enum(['init', 'research', 'spec', 'design', 'prepare', 'refine-plan', 'approve-plan', 'flow', 'craft', 'status', 'worktree', 'verify', 'archive', 'loop-run', 'loop-start', 'loop-step', 'loop-status', 'loop-stop', 'loop-list', 'loop-sync', 'loop-watchdog', 'loop-poll', 'loop-operator', 'troubleshoot', 'record', 'help', 'repair', 'sync-agents', 'init-config'])
                 .describe('Weave command to execute'),
             docsPath: z.string().optional()
                 .describe('Path to requirements documents (for design command)'),
@@ -185,7 +194,7 @@ Examples:
 
         execute: async (
             args: {
-                command: 'init' | 'research' | 'spec' | 'design' | 'prepare' | 'refine-plan' | 'approve-plan' | 'flow' | 'craft' | 'status' | 'worktree' | 'verify' | 'archive' | 'loop-run' | 'loop-start' | 'loop-step' | 'loop-status' | 'loop-stop' | 'loop-list' | 'loop-sync' | 'loop-watchdog' | 'loop-poll' | 'loop-operator' | 'troubleshoot' | 'record' | 'help' | 'repair';
+                command: 'init' | 'research' | 'spec' | 'design' | 'prepare' | 'refine-plan' | 'approve-plan' | 'flow' | 'craft' | 'status' | 'worktree' | 'verify' | 'archive' | 'loop-run' | 'loop-start' | 'loop-step' | 'loop-status' | 'loop-stop' | 'loop-list' | 'loop-sync' | 'loop-watchdog' | 'loop-poll' | 'loop-operator' | 'troubleshoot' | 'record' | 'help' | 'repair' | 'sync-agents' | 'init-config';
                 docsPath?: string;
                 phaseId?: string;
                 projectName?: string;
@@ -302,6 +311,12 @@ Examples:
 
                     case 'repair':
                         return await handleRepair(basePath);
+
+                    case 'sync-agents':
+                        return await handleSyncAgents(basePath);
+
+                    case 'init-config':
+                        return await handleInitConfig(basePath);
 
                     case 'help':
                         return getHelpMessage();
@@ -2593,6 +2608,104 @@ async function handleRepair(basePath: string): Promise<string> {
     const manager = getPhaseManager(basePath);
     const { results, summary } = await manager.repairPlans();
     return summary;
+}
+
+/**
+ * Handle `sync-agents` command.
+ * 
+ * Reads maskweaver.config.json (project or global ~/.config/opencode/)
+ * and force-overwrites all dummy-human agent .md files in .opencode/agents/.
+ * 
+ * Search order:
+ * 1. {projectDir}/maskweaver.config.json
+ * 2. {projectDir}/.opencode/maskweaver.config.json
+ * 3. ~/.config/opencode/maskweaver.config.json (user global)
+ */
+async function handleSyncAgents(basePath: string): Promise<string> {
+    const agentsDir = path.join(basePath, '.opencode', 'agents');
+    const result = generatePoolAgentFilesFromConfig(basePath, agentsDir, { force: true });
+
+    const lines: string[] = [];
+    lines.push('## 🔄 Agent Sync Results');
+    lines.push('');
+
+    if (result.created.length > 0) {
+        lines.push(`**Created:** ${result.created.length} files`);
+        for (const f of result.created) {
+            lines.push(`  ✅ ${toWorkspaceRelative(basePath, f)}`);
+        }
+    }
+
+    if (result.updated.length > 0) {
+        lines.push(`**Updated:** ${result.updated.length} files`);
+        for (const f of result.updated) {
+            lines.push(`  🔄 ${toWorkspaceRelative(basePath, f)}`);
+        }
+    }
+
+    if (result.skipped.length > 0) {
+        lines.push(`**Skipped:** ${result.skipped.length} files`);
+        for (const f of result.skipped) {
+            lines.push(`  ⏭️ ${toWorkspaceRelative(basePath, f)}`);
+        }
+    }
+
+    if (result.errors.length > 0) {
+        lines.push('**Errors:**');
+        for (const err of result.errors) {
+            lines.push(`  ❌ ${err}`);
+        }
+    }
+
+    if (result.created.length === 0 && result.updated.length === 0 && result.errors.length === 0) {
+        lines.push('No changes. All agent files are up to date.');
+    }
+
+    if (result.created.length > 0 || result.updated.length > 0) {
+        lines.push('');
+        lines.push('> ⚠️ **Important:** You may need to restart OpenCode for the updated agent files to take effect.');
+    }
+
+    return lines.join('\n');
+}
+
+/**
+ * Handle `init-config` command.
+ * 
+ * Creates default maskweaver.config.json (runtime config with pool template)
+ * and .opencode/maskweaver.json (plugin config) if they don't exist.
+ * Does NOT overwrite existing files.
+ */
+async function handleInitConfig(basePath: string): Promise<string> {
+    const lines: string[] = [];
+    lines.push('## 📝 Config Initialization');
+    lines.push('');
+
+    // Create runtime config (maskweaver.config.json)
+    const runtimePath = writeDefaultRuntimeConfig(basePath);
+    if (runtimePath) {
+        lines.push(`✅ Created runtime config: ${toWorkspaceRelative(basePath, runtimePath)}`);
+        lines.push('   Edit this file to add your model names in the dummyHumans.pool,');
+        lines.push('   then run `weave sync-agents` to generate agent files.');
+    } else {
+        lines.push('⏭️  maskweaver.config.json already exists (skipped)');
+    }
+
+    lines.push('');
+
+    // Create plugin config (.opencode/maskweaver.json)
+    const pluginPath = writeDefaultPluginConfig(basePath);
+    if (pluginPath) {
+        lines.push(`✅ Created plugin config: ${toWorkspaceRelative(basePath, pluginPath)}`);
+    } else {
+        lines.push('⏭️  .opencode/maskweaver.json already exists (skipped)');
+    }
+
+    lines.push('');
+    lines.push('> 💡 Tip: You can also set up a global config at `~/.config/opencode/maskweaver.config.json`');
+    lines.push('>   with your model pool, then run `weave sync-agents` in any project to apply it.');
+
+    return lines.join('\n');
 }
 
 async function handleArchive(basePath: string): Promise<string> {

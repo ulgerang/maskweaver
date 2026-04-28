@@ -1,6 +1,7 @@
 ---
 description: "Squad Operator - Squad 미션을 조율하고 워커에게 작업 할당"
 mode: subagent
+model: opencode-go/deepseek-v4-pro
 temperature: 0.3
 permission:
   edit: allow

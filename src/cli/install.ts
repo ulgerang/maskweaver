@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { VERSION } from "../version.js";
+import { runDoctor, printDoctorReport } from "./doctor.js";
 
 // ============================================================================
 // Constants
@@ -381,6 +382,15 @@ program
   .option("-l, --local", "프로젝트 설정 상태 확인")
   .action(async (options) => {
     await showStatus(options);
+  });
+
+program
+  .command("doctor")
+  .description("Maskweaver 설정을 진단합니다 (oh-my-openagent 스타일)")
+  .action(async () => {
+    const report = runDoctor();
+    printDoctorReport(report);
+    process.exit(report.failed > 0 ? 1 : 0);
   });
 
 // Default action: show help

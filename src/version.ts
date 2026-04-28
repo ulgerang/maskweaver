@@ -9,7 +9,7 @@
  * 2. Update this constant
  * 3. That's it — all other files import from here
  */
-export const VERSION = '0.7.36';
+export const VERSION = '0.8.6';
 
 /**
  * Returns a formatted version string for display.

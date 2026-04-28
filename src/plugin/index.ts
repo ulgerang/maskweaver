@@ -13,39 +13,12 @@
 */
 
 import { z } from 'zod';
-
-// Inline shim: tool() is just an identity function in @opencode-ai/plugin
-// We inline it to avoid bundler resolution bugs with the upstream package
-const tool = <T>(input: T): T => input;
-
-// Local type definition for Plugin to avoid @opencode-ai/plugin import issues
-interface PluginContext {
-  client: {
-    app: {
-      log(entry: { service: string; level: 'debug' | 'info' | 'warn' | 'error'; message: string }): void;
-    };
-  };
-  directory: string;
-}
-
-interface PluginEvent {
-  type: string;
-  [key: string]: unknown;
-}
-
-type Plugin = (context: PluginContext) => Promise<{
-  agent?: Record<string, unknown>;
-  'experimental.chat.system.transform'?: (input: unknown, output: { system?: string[] }) => Promise<void>;
-  tool?: Record<string, unknown>;
-  event?: (context: { event: PluginEvent }) => Promise<void>;
-  config?: (config: unknown) => Promise<void>;
-}>;
+import { tool, type Plugin } from '@opencode-ai/plugin';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parse as parseYaml } from 'yaml';
 import { VERSION } from '../version.js';
 import {
   loadPluginConfig,
@@ -53,7 +26,6 @@ import {
   isToolEnabled,
   getDefaultMask,
   isAutoActivateEnabled,
-  getAgentOverride,
   isVerboseLoggingEnabled,
   isCompletionSoundEnabled,
   validateConfig,
@@ -588,7 +560,27 @@ function buildRichPrompt(mask: MaskSchema): string {
 }
 
 // ============================================================================
-// Tool Factory Functions (oh-my-opencode pattern)
+// Plugin Logging Helper
+// ============================================================================
+
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+function pluginLog(
+  client: unknown,
+  level: LogLevel,
+  message: string,
+): void {
+  (client as any).app.log({
+    body: {
+      service: 'maskweaver',
+      level,
+      message,
+    },
+  });
+}
+
+// ============================================================================
+// Helper functions for tool factories
 // ============================================================================
 
 function createListMasksTool(maskLoader: MaskLoader, activeMask: () => LoadedMask | null) {
@@ -741,7 +733,7 @@ Active mask: ${active ? `${active.profile.name} (${active.metadata.id})` : 'none
   };
 }
 
-function getSessionId(event: PluginEvent): string | null {
+function getSessionId(event: { type: string; [key: string]: unknown }): string | null {
   if (typeof event.sessionID === 'string') return event.sessionID;
   if (typeof event.sessionId === 'string') return event.sessionId;
   return null;
@@ -802,106 +794,8 @@ interface PluginState {
 let state: PluginState | null = null;
 
 // ============================================================================
-// Plugin (oh-my-opencode pattern)
-// ============================================================================
 
-// ============================================================================
-// Agent Utilities
-// ============================================================================
-
-interface AgentDefinition {
-  name?: string;
-  description?: string;
-  mode?: 'primary' | 'subagent';
-  model?: string;
-  temperature?: number;
-  prompt?: string;
-  tools?: Record<string, boolean>;
-  permission?: Record<string, string | Record<string, string>>;
-}
-
-function parseAgentMarkdown(content: string): AgentDefinition {
-  const parts = content.split('---');
-  if (parts.length < 3) {
-    return { prompt: content.trim() };
-  }
-
-  try {
-    const frontmatter = parseYaml(parts[1]);
-    const prompt = parts.slice(2).join('---').trim();
-    return { ...frontmatter, prompt };
-  } catch (e) {
-    return { prompt: content.trim() };
-  }
-}
-
-// ============================================================================
-// Default Embedded Agents (ensures first-run works without restart)
-// ============================================================================
-
-const DEFAULT_AGENTS: Record<string, AgentDefinition> = {
-  'dummy-human': {
-    description: 'Dummy-Human - Pure execution agent that performs tasks with masks assigned by Mask Weaver',
-    mode: 'subagent',
-    temperature: 0.2,
-    permission: {
-      edit: 'allow',
-      bash: 'allow',
-      webfetch: 'allow',
-    },
-    prompt: `# Dummy-Human
-
-You are a **Dummy-Human**.
-
-## Identity
-
-You are a pure execution agent. You accurately perform work instructions received from the Mask Weaver.
-
-## Behavior Principles
-
-1. If the Mask Weaver provides a **mask (persona)**, become that expert and work accordingly
-2. If no mask is provided, work as a competent software engineer
-3. Complete assigned tasks accurately
-4. Report results clearly
-
-## Result Reporting
-
-When work is complete:
-- Summary of work performed
-- Generated outputs
-- Additional considerations (if any)`,
-  },
-};
-
-function loadAgentAssets(...assetsDirs: string[]): Record<string, AgentDefinition> {
-  // Start with default embedded agents (always available)
-  const agents: Record<string, AgentDefinition> = { ...DEFAULT_AGENTS };
-
-  // Load from each directory in order (later directories override earlier ones)
-  for (const assetsDir of assetsDirs) {
-    const agentsDir = path.join(assetsDir, 'agents');
-
-    if (!fs.existsSync(agentsDir)) continue;
-
-    try {
-      const files = fs.readdirSync(agentsDir);
-      for (const file of files) {
-        if (file.endsWith('.md') && file !== 'dummy-template.md') {
-          const agentId = path.basename(file, '.md');
-          const content = fs.readFileSync(path.join(agentsDir, file), 'utf-8');
-          agents[agentId] = parseAgentMarkdown(content);
-        }
-      }
-    } catch (e) {
-      // Ignore errors - default agents still available
-    }
-  }
-
-  return agents;
-}
-
-
-export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
+export const MaskweaverPlugin: Plugin = async ({ client, directory, project, worktree, $, serverUrl }) => {
   // ==========================================================================
   // 1. Load Configuration (oh-my-opencode pattern)
   // ==========================================================================
@@ -910,11 +804,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
   // Validate configuration
   const configErrors = validateConfig(pluginConfig);
   if (configErrors.length > 0) {
-    client.app.log({
-      service: 'maskweaver',
-      level: 'warn',
-      message: `Configuration validation errors: ${configErrors.join(', ')}`,
-    });
+    pluginLog(client, 'warn', `Configuration validation errors: ${configErrors.join(', ')}`);
   }
 
   const verbose = isVerboseLoggingEnabled(pluginConfig);
@@ -928,25 +818,13 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
   const isFirstInstall = installResult.installed.length > 0;
 
   if (isFirstInstall) {
-    client.app.log({
-      service: 'maskweaver',
-      level: 'info',
-      message: `Installed ${installResult.installed.length} files to .opencode/ (agents, masks)`,
-    });
+    pluginLog(client, 'info', `Installed ${installResult.installed.length} files to .opencode/ (agents, masks)`);
     // Show prominent restart message for first-time installation
-    client.app.log({
-      service: 'maskweaver',
-      level: 'warn',
-      message: `⚠️ RESTART REQUIRED: Please restart OpenCode to activate all Maskweaver features (agents, masks, commands).`,
-    });
+    pluginLog(client, 'warn', `⚠️ RESTART REQUIRED: Please restart OpenCode to activate all Maskweaver features (agents, masks, commands).`);
   }
 
   if (installResult.errors.length > 0) {
-    client.app.log({
-      service: 'maskweaver',
-      level: 'warn',
-      message: `Asset errors: ${installResult.errors.join(', ')}`,
-    });
+    pluginLog(client, 'warn', `Asset errors: ${installResult.errors.join(', ')}`);
   }
 
   // ==========================================================================
@@ -969,29 +847,17 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
   state = pluginState;
 
   // Log plugin loaded
-  client.app.log({
-    service: 'maskweaver',
-    level: 'info',
-    message: `Maskweaver plugin loaded v${VERSION}`,
-  });
+  pluginLog(client, 'info', `Maskweaver plugin loaded v${VERSION}`);
 
   if (fs.existsSync(masksDir)) {
     pluginState.maskLoader = new MaskLoader(masksDir, pluginConfig);
     try {
       await pluginState.maskLoader.loadCatalog();
       if (verbose) {
-        client.app.log({
-          service: 'maskweaver',
-          level: 'info',
-          message: `Masks found at: ${masksDir}`,
-        });
+          pluginLog(client, 'info', `Masks found at: ${masksDir}`);
       }
     } catch (e) {
-      client.app.log({
-        service: 'maskweaver',
-        level: 'warn',
-        message: `Failed to load masks: ${e}`,
-      });
+      pluginLog(client, 'warn', `Failed to load masks: ${e}`);
       pluginState.maskLoader = null;
     }
   }
@@ -1007,24 +873,12 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
       const defaultMask = await pluginState.maskLoader.load(defaultMaskId);
       if (defaultMask) {
         pluginState.activeMask = defaultMask;
-        client.app.log({
-          service: 'maskweaver',
-          level: 'info',
-          message: `Auto-activated default mask: ${defaultMaskId} (${defaultMask.profile.name})`,
-        });
+        pluginLog(client, 'info', `Auto-activated default mask: ${defaultMaskId} (${defaultMask.profile.name})`);
       } else {
-        client.app.log({
-          service: 'maskweaver',
-          level: 'warn',
-          message: `Default mask "${defaultMaskId}" not found or disabled`,
-        });
+        pluginLog(client, 'warn', `Default mask "${defaultMaskId}" not found or disabled`);
       }
     } catch (e) {
-      client.app.log({
-        service: 'maskweaver',
-        level: 'warn',
-        message: `Failed to auto-activate default mask: ${e}`,
-      });
+      pluginLog(client, 'warn', `Failed to auto-activate default mask: ${e}`);
     }
   }
 
@@ -1043,20 +897,21 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
 
   // Helper to ensure tool arguments are compatible with opencode's expected format.
   // opencode expects a ZodRawShape (raw object), NOT a ZodObject instance.
-  const wrapSchema = (schema: any): any => {
+  // Zod 4: schema.def.shape, Zod 3: schema._def.shape()
+  const wrapSchema = (schema: any): z.ZodRawShape => {
     if (!schema || typeof schema !== 'object') return schema;
 
-    // If it's a ZodObject (Zod 4), extract its shape
-    if (schema.def && typeof schema.def === 'object' && schema.type === 'object') {
-      return schema.def.shape;
+    // Zod 4 — def.shape is a plain object
+    if (schema.def && typeof schema.def === 'object' && schema.type === 'object' && schema.def.shape && typeof schema.def.shape === 'object') {
+      return schema.def.shape as z.ZodRawShape;
     }
 
-    // If it's a ZodObject (Zod 3), extract its shape
+    // Zod 3 — _def.shape() returns a plain object
     if (schema._def && typeof schema._def.shape === 'function') {
-      return schema._def.shape();
+      return schema._def.shape() as z.ZodRawShape;
     }
 
-    return schema;
+    return schema as z.ZodRawShape;
   };
 
   const tools: Record<string, any> = {};
@@ -1064,32 +919,32 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
   if (pluginState.maskLoader) {
     if (isToolActive('list_masks')) {
       const tool = createListMasksTool(pluginState.maskLoader, getActiveMask);
-      tool.args = wrapSchema(tool.args);
+      tool.args = wrapSchema(tool.args) as any;
       tools.list_masks = tool;
     }
 
     if (isToolActive('select_mask')) {
       const tool = createSelectMaskTool(pluginState.maskLoader, getActiveMask, setActiveMask);
-      tool.args = wrapSchema(tool.args);
+      tool.args = wrapSchema(tool.args) as any;
       tools.select_mask = tool;
     }
 
     if (isToolActive('deselect_mask')) {
       const tool = createDeselectMaskTool(getActiveMask, setActiveMask);
-      tool.args = wrapSchema(tool.args);
+      tool.args = wrapSchema(tool.args) as any;
       tools.deselect_mask = tool;
     }
 
     if (isToolActive('get_mask_prompt')) {
       const tool = createGetMaskPromptTool(pluginState.maskLoader, getActiveMask);
-      tool.args = wrapSchema(tool.args);
+      tool.args = wrapSchema(tool.args) as any;
       tools.get_mask_prompt = tool;
     }
   }
 
   if (isToolActive('maskweaver_status')) {
     const tool = createMaskweaverStatusTool(pluginState.maskLoader, masksDir, getActiveMask);
-    tool.args = wrapSchema(tool.args);
+    tool.args = wrapSchema(tool.args) as any;
     tools.maskweaver_status = tool;
   }
 
@@ -1098,7 +953,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const memorySearchTool = createMemorySearchTool();
     tools.memory_search = {
       description: memorySearchTool.description,
-      args: wrapSchema(memorySearchTool.args),
+      args: wrapSchema(memorySearchTool.args) as any,
       execute: (args: any) => memorySearchTool.execute(args, { worktree: directory }),
     };
   }
@@ -1107,7 +962,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const memoryWriteTool = createMemoryWriteTool();
     tools.memory_write = {
       description: memoryWriteTool.description,
-      args: wrapSchema(memoryWriteTool.args),
+      args: wrapSchema(memoryWriteTool.args) as any,
       execute: (args: any) => memoryWriteTool.execute(args, { worktree: directory }),
     };
   }
@@ -1116,7 +971,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const memoryGetTool = createMemoryGetTool();
     tools.memory_get = {
       description: memoryGetTool.description,
-      args: wrapSchema(memoryGetTool.args),
+      args: wrapSchema(memoryGetTool.args) as any,
       execute: (args: any) => memoryGetTool.execute(args, { worktree: directory }),
     };
   }
@@ -1125,7 +980,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const memoryIndexerTool = createMemoryIndexerTool();
     tools.memory_indexer = {
       description: memoryIndexerTool.description,
-      args: wrapSchema(memoryIndexerTool.args),
+      args: wrapSchema(memoryIndexerTool.args) as any,
       execute: (args: any) => memoryIndexerTool.execute(args, { worktree: directory }),
     };
   }
@@ -1135,7 +990,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const contextTool = createContextTool();
     tools.context = {
       description: contextTool.description,
-      args: wrapSchema(contextTool.args),
+      args: wrapSchema(contextTool.args) as any,
       execute: (args: any) => contextTool.execute(args, { worktree: directory }),
     };
   }
@@ -1145,7 +1000,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const retrospectTool = createRetrospectTool();
     tools.retrospect = {
       description: retrospectTool.description,
-      args: wrapSchema(retrospectTool.args),
+      args: wrapSchema(retrospectTool.args) as any,
       execute: (args: any) => retrospectTool.execute(args, { worktree: directory }),
     };
   }
@@ -1155,7 +1010,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const maskSaveTool = createMaskSaveTool();
     tools.mask_save = {
       description: maskSaveTool.description,
-      args: wrapSchema(maskSaveTool.args),
+      args: wrapSchema(maskSaveTool.args) as any,
       execute: (args: any) => maskSaveTool.execute(args, { worktree: directory }),
     };
   }
@@ -1165,7 +1020,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const squadTool = createSquadTool();
     tools.squad = {
       description: squadTool.description,
-      args: wrapSchema(squadTool.args),
+      args: wrapSchema(squadTool.args) as any,
       execute: (args: any) => squadTool.execute(args, { worktree: directory }),
     };
   }
@@ -1175,7 +1030,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const weaveTool = createWeaveTool();
     tools.weave = {
       description: weaveTool.description,
-      args: wrapSchema(weaveTool.args),
+      args: wrapSchema(weaveTool.args) as any,
       execute: (args: any) => weaveTool.execute(args, { worktree: directory }),
     };
   }
@@ -1185,115 +1040,27 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory }) => {
     const slashcommandTool = createSlashcommandTool();
     tools.slashcommand = {
       description: slashcommandTool.description,
-      args: wrapSchema(slashcommandTool.args),
+      args: wrapSchema(slashcommandTool.args) as any,
       execute: (args: any) => slashcommandTool.execute(args, { worktree: directory }),
     };
   }
 
   // ==========================================================================
-  // 8. Load and register agents
+  // 8. Agents are loaded from .opencode/agents/*.md files by OpenCode's
+  //    filesystem-based agent loader (see config/agent.ts:110-140).
+  //    installAssets() in step 2 copies agent .md files so they are picked up.
+  //    The 'agent' property in Hooks is NOT consumed by OpenCode — confirmed
+  //    by source analysis (packages/opencode/src/plugin/index.ts:92-103).
   // ==========================================================================
-  const assetsDir = getAssetsDir();
-  const projectOpencodeDir = path.join(directory, '.opencode');
-  // Load from package assets first, then project .opencode (project overrides package)
-  const loadedAgents = loadAgentAssets(assetsDir, projectOpencodeDir);
-
-  // ==========================================================================
-  // 8b. Generate agents from model pool (or legacy fallback)
-  // ==========================================================================
-  {
-    const { loadRuntimeConfig, normalizeDummyHumansConfig } = await import('../shared/config.js');
-    const { createModelRegistry } = await import('../shared/model-registry.js');
-    const runtimeConfig = loadRuntimeConfig(directory);
-
-    if (runtimeConfig.dummyHumans) {
-      const pool = normalizeDummyHumansConfig(runtimeConfig.dummyHumans);
-      // Initialize the global model registry
-      createModelRegistry(pool);
-
-      if (loadedAgents['dummy-human']) {
-        // Generate agent variants from pool entries
-        for (const entry of pool) {
-          const agentName = `dummy-${entry.id}`;
-          if (!loadedAgents[agentName]) {
-            const tierLabel = entry.tier === 'flash' ? 'Flash' : entry.tier === 'premium' ? 'Premium' : 'Standard';
-            const capStr = entry.capabilities.slice(0, 3).join(', ');
-            loadedAgents[agentName] = {
-              ...loadedAgents['dummy-human'],
-              description: `Dummy-Human (${entry.id}) - ${tierLabel}. ${entry.description || capStr}. [max ${entry.maxConcurrent} concurrent]`,
-              model: entry.model,
-            };
-          }
-        }
-
-        // Also ensure legacy dummy-flash / dummy-premium aliases exist (for backward compat)
-        const flashEntry = pool.find(e => e.tier === 'flash');
-        const humanEntry = pool.find(e => e.tier === 'human');
-        const premiumEntry = pool.find(e => e.tier === 'premium');
-
-        if (flashEntry && !loadedAgents['dummy-flash']) {
-          loadedAgents['dummy-flash'] = loadedAgents[`dummy-${flashEntry.id}`];
-        }
-        if (humanEntry) {
-           // dummy-human already exists as the base agent; just update its model from pool
-           loadedAgents['dummy-human'].model = humanEntry.model;
-         }
-        if (premiumEntry && !loadedAgents['dummy-premium']) {
-          loadedAgents['dummy-premium'] = loadedAgents[`dummy-${premiumEntry.id}`];
-        }
-
-        // Fallback: if no tier mapping found, use defaults
-        if (!loadedAgents['dummy-flash']) {
-          loadedAgents['dummy-flash'] = {
-            ...loadedAgents['dummy-human'],
-            description: 'Dummy-Human (Flash) - Fast and cheap',
-            model: 'google/gemini-2.0-flash',
-          };
-        }
-        if (!loadedAgents['dummy-premium']) {
-          loadedAgents['dummy-premium'] = {
-            ...loadedAgents['dummy-human'],
-            description: 'Dummy-Human (Premium) - Powerful and reasoning',
-            model: 'google/gemini-2.0-pro-exp-02-05',
-          };
-        }
-      }
-    } else {
-      // No pool config → legacy hardcoded defaults
-      if (loadedAgents['dummy-human']) {
-        if (!loadedAgents['dummy-flash']) {
-          loadedAgents['dummy-flash'] = {
-            ...loadedAgents['dummy-human'],
-            description: 'Dummy-Human (Flash) - Fast and cheap',
-            model: 'google/gemini-2.0-flash',
-          };
-        }
-        if (!loadedAgents['dummy-premium']) {
-          loadedAgents['dummy-premium'] = {
-            ...loadedAgents['dummy-human'],
-            description: 'Dummy-Human (Premium) - Powerful and reasoning',
-            model: 'google/gemini-2.0-pro-exp-02-05',
-          };
-        }
-      }
-    }
-  }
-
-  // Apply config overrides to agents
-  for (const agentId of Object.keys(loadedAgents)) {
-    const override = getAgentOverride(pluginConfig, agentId);
-    if (override) {
-      if (override.model) loadedAgents[agentId].model = override.model;
-      if (override.systemPrompt) loadedAgents[agentId].prompt = override.systemPrompt;
-    }
-  }
 
   // ==========================================================================
-  // 9. Return plugin hooks
+  // 9. Return plugin hooks (official OpenCode Hooks interface only)
+  //    Note: Agents are registered via .opencode/agents/*.md files (installed by
+  //    installAssets()), NOT via the plugin return. The Hooks type does not
+  //    include 'agent' — OpenCode loads agents from the filesystem exclusively.
   // ==========================================================================
   return {
-    // Agent registration
-    agent: loadedAgents,
+    // Agent registration handled via .opencode/agents/*.md files (see installAssets)
 
     // System prompt transform - inject active mask
     'experimental.chat.system.transform': async (_input, output) => {
@@ -1321,11 +1088,7 @@ ${buildRichPrompt(state.activeMask)}
           try {
             const masks = await pluginState.maskLoader.listAll();
             const categories = await pluginState.maskLoader.listCategories();
-            client.app.log({
-              service: 'maskweaver',
-              level: 'info',
-              message: `Session started - ${masks.length} masks available across ${categories.length} categories`,
-            });
+            pluginLog(client, 'info', `Session started - ${masks.length} masks available across ${categories.length} categories`);
           } catch (_e) {
             // Ignore errors
           }
@@ -1357,20 +1120,15 @@ ${buildRichPrompt(state.activeMask)}
           pluginState.activeMask = null;
 
           if (wasActive) {
-            client.app.log({
-              service: 'maskweaver',
-              level: 'info',
-              message: 'Session ended - active mask cleared',
-            });
+            pluginLog(client, 'info', 'Session ended - active mask cleared');
           }
         }
       }
     },
 
-    // Config hook - (oh-my-opencode pattern)
+    // Config hook - allows plugins to modify opencode configuration
     config: async (config: any) => {
-      // NOTE: Current opencode version expects config to be a function, not an object.
-      // Agent overrides are currently not supported via this hook in opencode core.
+      // Reserved for future configuration injection (model, provider, etc.)
       return;
     },
   };

@@ -11,7 +11,8 @@
   "files": [
     "dist",
     "masks",
-    "assets"
+    "assets",
+    "postinstall.mjs"
   ],
   "exports": {
     ".": {
@@ -75,6 +76,7 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "lint": "tsc --noEmit",
+    "postinstall": "node postinstall.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

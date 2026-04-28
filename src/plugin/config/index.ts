@@ -15,15 +15,22 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 
 /**
- * Logger interface for config loading
+ * Logger interface for config loading.
+ * Accepts the SDK client (or any compatible object).
  */
 interface ConfigLoaderContext {
-  client: {
-    app: {
-      log(entry: { service: string; level: string; message: string }): void;
-    };
-  };
+  client: unknown;
   verbose?: boolean;
+}
+
+function pluginLog(ctx: ConfigLoaderContext, level: string, message: string): void {
+  (ctx.client as any).app.log({
+    body: {
+      service: 'maskweaver',
+      level,
+      message,
+    },
+  });
 }
 
 // ============================================================================
@@ -160,22 +167,14 @@ export function loadPluginConfig(
         
         // Log successful config load
         if (ctx?.verbose) {
-          ctx.client.app.log({
-            service: 'maskweaver',
-            level: 'info',
-            message: `Loaded config from: ${location}`,
-          });
+          pluginLog(ctx, 'info', `Loaded config from: ${location}`);
         }
         
         return config;
       } catch (error) {
         // Log error but continue searching
         if (ctx) {
-          ctx.client.app.log({
-            service: 'maskweaver',
-            level: 'warn',
-            message: `Failed to load config from ${location}: ${error}`,
-          });
+          pluginLog(ctx, 'warn', `Failed to load config from ${location}: ${error}`);
         }
       }
     }
@@ -183,11 +182,7 @@ export function loadPluginConfig(
   
   // No configuration found - return empty config
   if (ctx?.verbose) {
-    ctx.client.app.log({
-      service: 'maskweaver',
-      level: 'info',
-      message: 'No maskweaver.json found, using defaults',
-    });
+    pluginLog(ctx, 'info', 'No maskweaver.json found, using defaults');
   }
   
   return {};

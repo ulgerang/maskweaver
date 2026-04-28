@@ -859,9 +859,25 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory, project, wor
   }
 
   // ==========================================================================
-  // 2b. Auto-create default config files (global first, then project)
+  // 2b. Auto-create/migrate default config files (global first, then project)
   // ==========================================================================
   const globalConfigDir = path.join(os.homedir(), '.config', 'opencode');
+
+  // Migrate/update global config with missing fields
+  const globalConfigPath = path.join(globalConfigDir, 'maskweaver.config.json');
+  if (fs.existsSync(globalConfigPath)) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(globalConfigPath, 'utf-8'));
+      let migrated = false;
+      if (!existing.operator) { existing.operator = { model: 'opencode-go/deepseek-v4-pro', maxConcurrent: 2, description: 'Squad Operator model' }; migrated = true; }
+      if (!existing.gdc) { existing.gdc = { enabled: 'auto', strictVerify: false, autoSyncOnPrepare: true }; migrated = true; }
+      if (migrated) {
+        fs.writeFileSync(globalConfigPath, JSON.stringify(existing, null, 2) + '\n', 'utf-8');
+        pluginLog(client, 'info', 'Migrated global config with operator and gdc fields');
+      }
+    } catch { }
+  }
+
   const createdGlobalConfig = writeDefaultRuntimeConfig(globalConfigDir);
   if (createdGlobalConfig) {
     pluginLog(client, 'info', `Created global config: ${path.relative(os.homedir(), createdGlobalConfig)}`);

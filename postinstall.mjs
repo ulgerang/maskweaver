@@ -121,9 +121,19 @@ const DEFAULT_GLOBAL_CONFIG_TEMPLATE = {
       },
     ],
   },
+  operator: {
+    model: 'opencode-go/deepseek-v4-pro',
+    maxConcurrent: 2,
+    description: 'Squad Operator model - 작업 오케스트레이션 및 고급 추론',
+  },
   memory: {
     provider: 'text-only',
     enabled: false,
+  },
+  gdc: {
+    enabled: 'auto',
+    strictVerify: false,
+    autoSyncOnPrepare: true,
   },
   language: 'ko',
 };
@@ -132,34 +142,74 @@ function ensureGlobalConfig() {
   const globalDir = join(homedir(), '.config', 'opencode');
   const globalConfigPath = join(globalDir, 'maskweaver.config.json');
 
-  if (existsSync(globalConfigPath)) {
-    return false;
+  if (!existsSync(globalConfigPath)) {
+    // Fresh install: create config from template
+    try {
+      if (!existsSync(globalDir)) {
+        mkdirSync(globalDir, { recursive: true });
+      }
+      writeFileSync(
+        globalConfigPath,
+        JSON.stringify(DEFAULT_GLOBAL_CONFIG_TEMPLATE, null, 2) + '\n',
+        'utf-8'
+      );
+      return { created: true, migrated: false };
+    } catch {
+      return { created: false, migrated: false };
+    }
   }
 
+  // Existing config: migrate — add missing fields without overwriting user edits
   try {
-    if (!existsSync(globalDir)) {
-      mkdirSync(globalDir, { recursive: true });
+    const existing = JSON.parse(readFileSync(globalConfigPath, 'utf-8'));
+    let changed = false;
+
+    // Migrate: add operator if missing
+    if (!existing.operator) {
+      existing.operator = DEFAULT_GLOBAL_CONFIG_TEMPLATE.operator;
+      changed = true;
     }
-    writeFileSync(
-      globalConfigPath,
-      JSON.stringify(DEFAULT_GLOBAL_CONFIG_TEMPLATE, null, 2) + '\n',
-      'utf-8'
-    );
-    return true;
+
+    // Migrate: add gdc if missing
+    if (!existing.gdc) {
+      existing.gdc = DEFAULT_GLOBAL_CONFIG_TEMPLATE.gdc;
+      changed = true;
+    }
+
+    // Migrate: add dummyHumans if missing
+    if (!existing.dummyHumans) {
+      existing.dummyHumans = DEFAULT_GLOBAL_CONFIG_TEMPLATE.dummyHumans;
+      changed = true;
+    }
+
+    if (changed) {
+      writeFileSync(
+        globalConfigPath,
+        JSON.stringify(existing, null, 2) + '\n',
+        'utf-8'
+      );
+    }
+
+    return { created: false, migrated: changed };
   } catch {
-    return false;
+    return { created: false, migrated: false };
   }
 }
 
 function main() {
   const pkgVersion = getPackageVersion();
 
-  // Always create global config — regardless of OpenCode detection
-  const created = ensureGlobalConfig();
-  if (created) {
+  // Always create/migrate global config — regardless of OpenCode detection
+  const configResult = ensureGlobalConfig();
+  if (configResult.created) {
     console.log(`✓ maskweaver v${pkgVersion}: 글로벌 설정 파일 생성됨`);
     console.log(`  → ~/.config/opencode/maskweaver.config.json`);
     console.log(`  편집 후 프로젝트에서 \`weave sync-agents\`를 실행하세요`);
+    console.log('');
+  } else if (configResult.migrated) {
+    console.log(`✓ maskweaver v${pkgVersion}: 글로벌 설정 파일 업데이트됨`);
+    console.log(`  → ~/.config/opencode/maskweaver.config.json`);
+    console.log(`  operator 및 gdc 설정이 추가되었습니다.`);
     console.log('');
   }
 

@@ -10,6 +10,136 @@
 
 export type PhaseStatus = 'pending' | 'in_progress' | 'completed' | 'blocked';
 
+// ============================================================================
+// Map / Codebase Analysis Types
+// ============================================================================
+
+export interface StructuralIssue {
+    area: string;
+    severity: 'info' | 'warning' | 'critical';
+    title: string;
+    description: string;
+    suggestion: string;
+    affectedFiles: string[];
+}
+
+export interface StructuralChange {
+    area: string;
+    currentState: string;
+    proposedChange: string;
+    rationale: string;
+    impact: 'low' | 'medium' | 'high';
+    affectedFiles: string[];
+    breaking: boolean;
+    agreed: boolean;
+}
+
+export interface CodebaseCluster {
+    name: string;
+    nodeCount: number;
+    description: string;
+    keyFiles: string[];
+    dependencies: string[];
+}
+
+export interface MapResult {
+    mapPath: string;
+    generatedAt: string;
+    projectType: string;
+    techStack: string[];
+    gdcDetected: boolean;
+    dependencyGraph: {
+        nodes: number;
+        edges: number;
+        clusters: CodebaseCluster[];
+    };
+    structuralIssues: StructuralIssue[];
+    reuseCandidates: Array<{
+        filePath: string;
+        score: number;
+        matchedNeedles: string[];
+        snippet?: string;
+    }>;
+    summary: string;
+}
+
+export interface ConsentPrompt {
+    id: string;
+    topic: string;
+    currentState: string;
+    proposedChange: string;
+    rationale: string;
+    impact: 'low' | 'medium' | 'high';
+    breaking: boolean;
+    options: string[];
+    agreed: boolean;
+}
+
+// ============================================================================
+// Build / Ralph-loop Types
+// ============================================================================
+
+export type BuildTaskStatus = 'pending' | 'in_progress' | 'passed' | 'failed' | 'escalated';
+
+export interface BuildTaskState {
+    taskId: string;
+    phaseId: string;
+    status: BuildTaskStatus;
+    retryCount: number;
+    maxRetries: number;
+    lastError?: string;
+    lastFailureFingerprint?: string;
+    startedAt?: string;
+    completedAt?: string;
+    maskUsed?: string;
+    agentTier?: AgentTier;
+    commitHash?: string;
+}
+
+export type BuildStatus = 'running' | 'paused' | 'completed' | 'blocked' | 'failed';
+
+export interface BuildOptions {
+    phaseIds?: string[];
+    projectType?: string;
+    verifyMode?: 'quick' | 'full';
+    maxIterations?: number;
+    maxRetries?: number;
+    basePath?: string;
+}
+
+export interface BuildResult {
+    success: boolean;
+    buildId: string;
+    planName: string;
+    phasesCompleted: number;
+    phasesTotal: number;
+    tasksCompleted: number;
+    tasksFailed: number;
+    tasksEscalated: number;
+    verificationPassed: boolean;
+    durationMs: number;
+    completedAt: string;
+    summary: string;
+}
+
+export interface BuildLoopState {
+    buildId: string;
+    planName: string;
+    status: BuildStatus;
+    createdAt: string;
+    updatedAt: string;
+    startedAt?: string;
+    completedAt?: string;
+    currentPhaseId?: string;
+    currentTaskId?: string;
+    maxRetries: number;
+    globalRetryCount: number;
+    noProgressCount: number;
+    tasks: BuildTaskState[];
+    escalationReason?: string;
+    summary?: string;
+}
+
 export interface WeavePhase {
     id: string;                    // e.g., "P1", "P2"
     name: string;                  // e.g., "감정 선택 UI"
@@ -182,6 +312,14 @@ export interface WeavePlan {
     activeChangeId?: string;
     changeIds?: string[];
 
+    /** Map / codebase analysis metadata. */
+    mapGeneratedAt?: string;
+    mapReportPath?: string;
+    structuralChanges?: StructuralChange[];
+
+    /** OpenSpec artifact directory (relative path). */
+    openspecDir?: string;
+
     phases: WeavePhase[];
     currentPhase?: string;
 }
@@ -290,6 +428,13 @@ export type WeaveEvent =
     | { type: 'mask_selected'; maskId: string; reason: string }
     | { type: 'troubleshooting_found'; query: string; solutions: number }
     | { type: 'troubleshooting_recorded'; errorSignature: string }
-    | { type: 'user_handoff'; phaseId: string; checklist: string[] };
+    | { type: 'user_handoff'; phaseId: string; checklist: string[] }
+    | { type: 'map_generated'; mapPath: string; issues: number }
+    | { type: 'structural_change_detected'; change: string; rationale: string }
+    | { type: 'structural_change_agreed'; change: string }
+    | { type: 'build_started'; buildId: string; phasesTotal: number }
+    | { type: 'build_task_escalated'; phaseId: string; taskId: string; reason: string }
+    | { type: 'build_completed'; buildId: string; success: boolean; tasksCompleted: number }
+    | { type: 'openspec_artifacts_generated'; path: string };
 
 export type WeaveEventHandler = (event: WeaveEvent) => void;

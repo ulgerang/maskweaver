@@ -7,8 +7,9 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { WeaveEvent, EnvironmentAnalysis } from '../types.js';
+import type { WeaveEvent, EnvironmentAnalysis, MapResult, StructuralChange, ConsentPrompt } from '../types.js';
 import { analyzeEnvironment } from '../environment/index.js';
+import { readMapResult } from './map.js';
 
 // ============================================================================
 // Types
@@ -32,6 +33,9 @@ export interface IntakeResult {
     questions: Question[];
     similarProjects?: string[];  // From memory search
     environment?: EnvironmentAnalysis;  // Proactive environment analysis
+    codebaseMapPath?: string;     // Path to map-result.yaml if available
+    structuralChanges?: StructuralChange[];  // Detected structural changes from map
+    consentPrompts?: ConsentPrompt[];  // Generated consent prompts for user
 }
 
 export interface DocumentAnalysis {
@@ -344,7 +348,158 @@ async function searchSimilarProjects(
 }
 
 // ============================================================================
-// Main Intake Function
+// Map Integration — Structural Change Detection & Consent
+// ============================================================================
+
+export async function injectMapContext(
+    map: MapResult | null,
+    features: string[]
+): Promise<{ structuralChanges: StructuralChange[]; consentPrompts: ConsentPrompt[] }> {
+    const structuralChanges: StructuralChange[] = [];
+    const consentPrompts: ConsentPrompt[] = [];
+
+    if (!map) return { structuralChanges, consentPrompts };
+
+    for (const issue of map.structuralIssues) {
+        if (issue.severity === 'info') continue;
+
+        const area = issue.area;
+        const promptId = `consent-${area.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
+
+        const change: StructuralChange = {
+            area,
+            currentState: issue.description,
+            proposedChange: issue.suggestion,
+            rationale: `구조적 이슈 "${issue.title}" 해결 필요`,
+            impact: issue.severity === 'critical' ? 'high' : 'medium',
+            affectedFiles: issue.affectedFiles,
+            breaking: issue.severity === 'critical',
+            agreed: false,
+        };
+        structuralChanges.push(change);
+
+        consentPrompts.push({
+            id: promptId,
+            topic: area,
+            currentState: issue.description,
+            proposedChange: issue.suggestion,
+            rationale: `"${issue.title}" — ${issue.description}`,
+            impact: issue.severity === 'critical' ? 'high' : 'medium',
+            breaking: issue.severity === 'critical',
+            options: [
+                '승인 — 지금 수정',
+                '승인 — build 단계에서 수정',
+                '보류 — 이후 재검토',
+                '무시 — 현재 구조 유지',
+            ],
+            agreed: false,
+        });
+    }
+
+    return { structuralChanges, consentPrompts };
+}
+
+function generateInterviewQuestions(
+    features: string[],
+    techReqs: IntakeResult['technicalRequirements'],
+    map: MapResult | null
+): Question[] {
+    const questions = generateQuestions(features, techReqs);
+
+    if (map && map.structuralIssues.length > 0) {
+        const critical = map.structuralIssues.filter(i => i.severity === 'critical');
+        const warnings = map.structuralIssues.filter(i => i.severity === 'warning');
+        if (critical.length > 0) {
+            questions.unshift({
+                id: 'MAP-CRITICAL',
+                topic: '구조적 문제',
+                question: `코드베이스에서 ${critical.length}개의 Critical 이슈가 발견되었습니다. 계속 진행할까요?`,
+                options: ['이슈를 먼저 해결', '진행하되 build 단계에서 해결', '지금은 무시'],
+                required: true,
+            });
+        }
+        if (warnings.length > 0) {
+            questions.push({
+                id: 'MAP-WARNINGS',
+                topic: '권장 구조 변경',
+                question: `${warnings.length}개의 경고가 있습니다. 구조 변경 권장사항을 검토하시겠습니까?`,
+                options: ['검토', '나중에 검토', '무시'],
+                required: false,
+            });
+        }
+    }
+
+    if (features.length > 0) {
+        questions.push({
+            id: 'EXISTING-CODE',
+            topic: '기존 코드 활용',
+            question: '기존 코드베이스의 구조나 패턴을 유지하면서 구현하시겠습니까?',
+            options: ['최대한 기존 구조 유지', '필요시 구조 변경', '새로 작성'],
+            required: true,
+        });
+    }
+
+    return questions;
+}
+
+// ============================================================================
+// Interview — Multi-step Question Asking Until Clarity
+// ============================================================================
+
+export interface InterviewOptions {
+    docsPath: string;
+    basePath?: string;
+    mapResult?: MapResult | null;
+    onEvent?: (event: WeaveEvent) => void;
+}
+
+export interface InterviewResult {
+    intake: IntakeResult;
+    agreedStructuralChanges: StructuralChange[];
+    userAnswers: Record<string, string>;
+    satisfied: boolean;  // true when user has answered enough to proceed
+}
+
+export async function interview(options: InterviewOptions): Promise<InterviewResult> {
+    const basePath = options.basePath || process.cwd();
+
+    const intakeResult = await intake({
+        docsPath: options.docsPath,
+        onEvent: options.onEvent,
+    });
+
+    const map = options.mapResult !== undefined
+        ? options.mapResult
+        : await readMapResult(basePath);
+
+    const { structuralChanges, consentPrompts } = await injectMapContext(map, intakeResult.features);
+
+    const enhancedQuestions = generateInterviewQuestions(
+        intakeResult.features,
+        intakeResult.technicalRequirements,
+        map
+    );
+
+    const intakeWithMap: IntakeResult = {
+        ...intakeResult,
+        codebaseMapPath: map ? map.mapPath : undefined,
+        structuralChanges: structuralChanges.length > 0 ? structuralChanges : undefined,
+        consentPrompts: consentPrompts.length > 0 ? consentPrompts : undefined,
+    };
+
+    const hasUnansweredQuestions = enhancedQuestions.length > 0;
+    const hasPendingConsent = consentPrompts.length > 0 && consentPrompts.some(cp => !cp.agreed);
+
+    return {
+        intake: intakeWithMap,
+        agreedStructuralChanges: structuralChanges.filter(sc => sc.agreed),
+        userAnswers: {},
+        satisfied: !hasUnansweredQuestions && !hasPendingConsent,
+    };
+}
+
+// ============================================================================
+// Main Intake Function (Legacy — Enhanced)
 // ============================================================================
 
 export interface IntakeWithAnalysisOptions extends IntakeOptions {
@@ -428,6 +583,11 @@ export async function intake(options: IntakeOptions | IntakeWithAnalysisOptions)
         }
     }
 
+    const mapResult = await readMapResult(process.cwd());
+    const { structuralChanges } = mapResult
+        ? await injectMapContext(mapResult, features)
+        : { structuralChanges: [] };
+
     return {
         documents,
         features,
@@ -436,6 +596,8 @@ export async function intake(options: IntakeOptions | IntakeWithAnalysisOptions)
         questions,
         similarProjects: similarProjects.length > 0 ? similarProjects : undefined,
         environment,
+        codebaseMapPath: mapResult?.mapPath,
+        structuralChanges: structuralChanges.length > 0 ? structuralChanges : undefined,
     };
 }
 

@@ -26,6 +26,12 @@ import { plan } from '../../weave/stages/plan.js';
 import { preparePhaseExecution, formatExecutionPlan, runAIVerification, generateVerificationReport } from '../../weave/stages/execute.js';
 import { archiveChange } from '../../weave/stages/archive.js';
 import { handoff, generateStatusReport, handleUserResponse } from '../../weave/stages/handoff.js';
+import { analyzeCodebase, runGraphifyAnalysis, readMapResult } from '../../weave/stages/map.js';
+import { interview as interviewStage, injectMapContext } from '../../weave/stages/intake.js';
+import { executeBuildLoop, generateBuildState, generateBuildId, loadBuildState } from '../../weave/stages/build.js';
+import { generateOpenSpecArtifacts, ensureOpenSpecWorkspace } from '../../weave/stages/openspec.js';
+import { WeaveOrchestrator } from '../../weave/orchestrator.js';
+import { getBuildStateDir, getBuildStatePath, getMapReportPath } from '../../weave/change-artifacts.js';
 import { getPhaseManager } from '../../weave/phase-manager.js';
 import { recommendVerificationCommands, formatRecommendedCommandsAsBash } from '../../weave/verification/index.js';
 import {
@@ -84,6 +90,8 @@ export function createWeaveTool() {
 
 Commands:
 - init: Initialize weave workspace files and probe GDC integration
+- map [deep]: Analyze codebase structure via GDC + Graphify (knowledge graph)
+- interview [docsPath]: Multi-step question asking until clarity, with structural change detection
 - research [docsPath]: Deep-read docs + workspace context and write persistent research.md
 - spec [docsPath]: Generate baseline spec (requirements + AC)
 - design [docsPath]: Analyze requirements and create phase-based plan (auto-splits oversized plans)
@@ -92,6 +100,8 @@ Commands:
 - approve-plan: Approve the plan, or finalize a crafted phase when phaseId is provided
 - flow [docsPath]: One-command path (prepare -> auto-approve -> craft -> verify -> finalize)
 - craft [phaseId]: Prepare execution context for a phase (phase auto-select if omitted)
+- build [phaseIds]: Ralph-loop autonomous execution — runs approved plan until all tasks complete (no user intervention)
+- build-resume [buildId]: Resume a previously blocked build
 - status: View overall progress
 - worktree: Manage git worktrees for parallel work
 - verify: Run build/test verification for current worktree
@@ -127,7 +137,7 @@ Examples:
 - weave troubleshoot "Cannot find module 'xyz'"`,
 
         args: {
-            command: z.enum(['init', 'research', 'spec', 'design', 'prepare', 'refine-plan', 'approve-plan', 'flow', 'craft', 'status', 'worktree', 'verify', 'archive', 'loop-run', 'loop-start', 'loop-step', 'loop-status', 'loop-stop', 'loop-list', 'loop-sync', 'loop-watchdog', 'loop-poll', 'loop-operator', 'troubleshoot', 'record', 'help', 'repair', 'sync-agents', 'init-config'])
+            command: z.enum(['init', 'map', 'interview', 'research', 'spec', 'design', 'prepare', 'refine-plan', 'approve-plan', 'flow', 'craft', 'build', 'build-resume', 'status', 'worktree', 'verify', 'archive', 'loop-run', 'loop-start', 'loop-step', 'loop-status', 'loop-stop', 'loop-list', 'loop-sync', 'loop-watchdog', 'loop-poll', 'loop-operator', 'troubleshoot', 'record', 'help', 'repair', 'sync-agents', 'init-config'])
                 .describe('Weave command to execute'),
             docsPath: z.string().optional()
                 .describe('Path to requirements documents (for design command)'),
@@ -191,11 +201,19 @@ Examples:
                 .describe('Polling interval for loop-poll/watchdog-style commands (default: 1000ms)'),
             pollCycles: z.number().int().min(1).max(1000).optional()
                 .describe('Maximum polling cycles for loop-poll (default: 30)'),
+            deep: z.boolean().optional()
+                .describe('Run deep analysis with Graphify (for map command)'),
+            maxRetries: z.number().int().min(1).max(10).optional()
+                .describe('Maximum retries per task (for build command)'),
+            buildId: z.string().optional()
+                .describe('Build ID to resume (for build-resume command)'),
+            phaseIds: z.string().optional()
+                .describe('Comma-separated phase IDs (for build command)'),
         },
 
         execute: async (
             args: {
-                command: 'init' | 'research' | 'spec' | 'design' | 'prepare' | 'refine-plan' | 'approve-plan' | 'flow' | 'craft' | 'status' | 'worktree' | 'verify' | 'archive' | 'loop-run' | 'loop-start' | 'loop-step' | 'loop-status' | 'loop-stop' | 'loop-list' | 'loop-sync' | 'loop-watchdog' | 'loop-poll' | 'loop-operator' | 'troubleshoot' | 'record' | 'help' | 'repair' | 'sync-agents' | 'init-config';
+                command: 'init' | 'map' | 'interview' | 'research' | 'spec' | 'design' | 'prepare' | 'refine-plan' | 'approve-plan' | 'flow' | 'craft' | 'build' | 'build-resume' | 'status' | 'worktree' | 'verify' | 'archive' | 'loop-run' | 'loop-start' | 'loop-step' | 'loop-status' | 'loop-stop' | 'loop-list' | 'loop-sync' | 'loop-watchdog' | 'loop-poll' | 'loop-operator' | 'troubleshoot' | 'record' | 'help' | 'repair' | 'sync-agents' | 'init-config';
                 docsPath?: string;
                 phaseId?: string;
                 projectName?: string;
@@ -227,6 +245,10 @@ Examples:
                 maxNoProgress?: number;
                 pollIntervalMs?: number;
                 pollCycles?: number;
+                deep?: boolean;
+                maxRetries?: number;
+                buildId?: string;
+                phaseIds?: string;
             },
             context: { worktree: string }
         ): Promise<string> => {
@@ -237,6 +259,18 @@ Examples:
                 switch (command) {
                     case 'init':
                         return await handleInit(basePath);
+
+                    case 'map':
+                        return await handleMap(args, basePath);
+
+                    case 'interview':
+                        return await handleInterview(args, basePath);
+
+                    case 'build':
+                        return await handleBuild(args, basePath);
+
+                    case 'build-resume':
+                        return await handleBuildResume(args, basePath);
 
                     case 'research':
                         return await handleResearch(args, basePath);
@@ -2189,6 +2223,238 @@ async function handleFlow(
         phaseId: resolvedPhaseId,
         reviewLines,
     });
+
+    return lines.join('\n');
+}
+
+// ============================================================================
+// Handle Map — Codebase Analysis
+// ============================================================================
+
+async function handleMap(
+    args: {
+        deep?: boolean;
+    },
+    basePath: string
+): Promise<string> {
+    const lines: string[] = [];
+    lines.push('## 🔍 Codebase Map');
+    lines.push('');
+
+    lines.push('Analyzing codebase structure...');
+    lines.push('');
+
+    const mapResult = await analyzeCodebase({
+        basePath,
+        deep: args.deep,
+        onMessage: (msg: string) => { lines.push(`> ${msg}`); },
+    });
+
+    if (args.deep) {
+        lines.push('Running Graphify deep analysis...');
+        const graphifyPath = await runGraphifyAnalysis(basePath);
+        if (graphifyPath) {
+            lines.push(`Graphify report: \`${graphifyPath}\``);
+        } else {
+            lines.push('Graphify analysis skipped or failed.');
+        }
+    }
+
+    lines.push('');
+    lines.push('### Summary');
+    lines.push(mapResult.summary);
+    lines.push('');
+    lines.push(`Full report: \`${mapResult.mapPath}\``);
+    lines.push('');
+    lines.push('Next: `weave command=interview docsPath="doc"` to discuss the plan.');
+
+    return lines.join('\n');
+}
+
+// ============================================================================
+// Handle Interview — Multi-step Question Asking
+// ============================================================================
+
+async function handleInterview(
+    args: {
+        docsPath?: string;
+    },
+    basePath: string
+): Promise<string> {
+    const docsPath = args.docsPath || 'docs';
+    const lines: string[] = [];
+    lines.push('## 💬 Interview');
+    lines.push('');
+
+    const mapResult = await readMapResult(basePath);
+    if (mapResult) {
+        lines.push(`📍 Map available: \`${mapResult.mapPath}\``);
+        if (mapResult.structuralIssues.length > 0) {
+            lines.push(`⚠️ ${mapResult.structuralIssues.length} structural issues detected.`);
+        }
+        lines.push('');
+    } else {
+        lines.push('ℹ️ No codebase map found. Run `weave command=map` first for deeper analysis.');
+        lines.push('');
+    }
+
+    try {
+        const interviewResult = await interviewStage({
+            docsPath,
+            basePath,
+            mapResult,
+        });
+
+        lines.push(`### Documents Analyzed`);
+        lines.push(`- ${interviewResult.intake.documents.length} document(s) analyzed`);
+        lines.push(`- ${interviewResult.intake.features.length} feature(s) identified`);
+        lines.push('');
+
+        if (interviewResult.intake.structuralChanges && interviewResult.intake.structuralChanges.length > 0) {
+            lines.push('### ⚠️ Structural Changes Detected');
+            lines.push('The following structural changes were identified from codebase analysis:');
+            lines.push('');
+            for (const sc of interviewResult.intake.structuralChanges) {
+                const icon = sc.breaking ? '🔴' : '🟡';
+                lines.push(`- ${icon} **${sc.area}** — ${sc.proposedChange}`);
+                lines.push(`  - Why: ${sc.rationale}`);
+                lines.push(`  - Impact: ${sc.impact}`);
+                lines.push(`  - Status: ${sc.agreed ? '✅ Agreed' : '⏳ Pending approval'}`);
+            }
+            lines.push('');
+            lines.push('To proceed, agree to structural changes via `weave command=approve-plan`.');
+            lines.push('');
+        }
+
+        lines.push('### Questions');
+        lines.push('Review the features and technical requirements above.');
+        lines.push('');
+        lines.push('Next: `weave command=design docsPath="docs/"` to create the plan.');
+    } catch (e: any) {
+        return `Error during interview: ${e.message || e}`;
+    }
+
+    return lines.join('\n');
+}
+
+// ============================================================================
+// Handle Build — Ralph-loop Autonomous Execution
+// ============================================================================
+
+async function handleBuild(
+    args: {
+        phaseIds?: string;
+        projectType?: string;
+        verifyMode?: 'quick' | 'full';
+        maxRetries?: number;
+    },
+    basePath: string
+): Promise<string> {
+    const lines: string[] = [];
+    lines.push('## 🏗️ Build');
+    lines.push('');
+
+    const manager = getPhaseManager(basePath);
+    const plan = await manager.loadPlan();
+    if (!plan) {
+        return 'Error: No active plan found. Run `weave command=design docsPath="docs/"` first.';
+    }
+
+    if (!plan.planApproved) {
+        return 'Error: Plan not approved. Run `weave command=approve-plan` first.';
+    }
+
+    lines.push(`Plan: **${plan.projectName}** (approved at ${plan.planApprovedAt || 'N/A'})`);
+    lines.push('');
+
+    const orchestrator = new WeaveOrchestrator();
+    const buildId = generateBuildId();
+    const state = generateBuildState(buildId, plan.planName || plan.projectName, args.maxRetries || 3);
+
+    const onMessages: string[] = [];
+
+    lines.push('Starting autonomous build loop...');
+    lines.push('');
+
+    const result = await executeBuildLoop({
+        plan,
+        state,
+        orchestrator,
+        basePath,
+        maxRetries: args.maxRetries,
+        phaseIds: args.phaseIds ? args.phaseIds.split(',').map((id: string) => id.trim()).filter(Boolean) : undefined,
+        onMessage: (msg: string) => { onMessages.push(msg); },
+    });
+
+    for (const msg of onMessages) {
+        lines.push(msg);
+    }
+
+    lines.push('');
+    if (result.success) {
+        lines.push('## ✅ Build Complete');
+    } else {
+        lines.push('## ⚠️ Build Blocked');
+    }
+    lines.push('');
+    lines.push(result.summary);
+
+    if (result.tasksEscalated > 0 || result.tasksFailed > 0) {
+        lines.push('');
+        lines.push('To resume after fixing issues: `weave command=build-resume buildId="<buildId>"`');
+    }
+
+    return lines.join('\n');
+}
+
+// ============================================================================
+// Handle Build Resume
+// ============================================================================
+
+async function handleBuildResume(
+    args: {
+        buildId?: string;
+        maxRetries?: number;
+    },
+    basePath: string
+): Promise<string> {
+    const lines: string[] = [];
+    lines.push('## 🔄 Build Resume');
+    lines.push('');
+
+    if (!args.buildId) {
+        return 'Error: buildId is required. Use `weave command=build-resume buildId="<id>"`.';
+    }
+
+    const state = await loadBuildState(basePath, args.buildId);
+    if (!state) {
+        return `Error: Build state not found: ${args.buildId}`;
+    }
+
+    if (state.status !== 'blocked') {
+        return `Build ${args.buildId} is not blocked (status: ${state.status}). No need to resume.`;
+    }
+
+    const manager = getPhaseManager(basePath);
+    const plan = await manager.loadPlan();
+    if (!plan) {
+        return 'Error: No active plan found.';
+    }
+
+    state.status = 'running';
+    state.escalationReason = undefined;
+
+    const orchestrator = new WeaveOrchestrator();
+
+    const result = await executeBuildLoop({
+        plan,
+        state,
+        orchestrator,
+        basePath,
+        maxRetries: args.maxRetries || 3,
+    });
+
+    lines.push(result.summary);
 
     return lines.join('\n');
 }

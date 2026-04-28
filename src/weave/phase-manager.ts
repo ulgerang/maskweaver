@@ -115,12 +115,41 @@ function serializePlan(plan: WeavePlan): string {
     if (plan.planApprovalNotes) {
         lines.push(`plan_approval_notes: ${yamlEscapeString(plan.planApprovalNotes)}`);
     }
+    if (plan.mapGeneratedAt) {
+        lines.push(`map_generated_at: ${yamlEscapeString(plan.mapGeneratedAt)}`);
+    }
+    if (plan.mapReportPath) {
+        lines.push(`map_report_path: ${yamlEscapeString(plan.mapReportPath)}`);
+    }
+    if (plan.openspecDir) {
+        lines.push(`openspec_dir: ${yamlEscapeString(plan.openspecDir)}`);
+    }
+    if (plan.structuralChanges && plan.structuralChanges.length > 0) {
+        lines.push('structural_changes:');
+        for (const sc of plan.structuralChanges) {
+            lines.push(`  - area: ${yamlEscapeString(sc.area)}`);
+            lines.push(`    current_state: ${yamlEscapeString(sc.currentState)}`);
+            lines.push(`    proposed_change: ${yamlEscapeString(sc.proposedChange)}`);
+            lines.push(`    rationale: ${yamlEscapeString(sc.rationale)}`);
+            lines.push(`    impact: ${sc.impact}`);
+            lines.push(`    breaking: ${sc.breaking ? 'true' : 'false'}`);
+            lines.push(`    agreed: ${sc.agreed ? 'true' : 'false'}`);
+            if (sc.affectedFiles.length > 0) {
+                lines.push(`    affected_files: [${sc.affectedFiles.map(f => yamlEscapeString(f)).join(', ')}]`);
+            }
+        }
+    }
+
     if (
         plan.researchPath
         || plan.researchUpdatedAt
         || typeof plan.planApproved === 'boolean'
         || plan.planApprovedAt
         || plan.planApprovalNotes
+        || plan.mapGeneratedAt
+        || plan.mapReportPath
+        || plan.openspecDir
+        || (plan.structuralChanges && plan.structuralChanges.length > 0)
     ) {
         lines.push('');
     }
@@ -687,6 +716,19 @@ export class PhaseManager {
             architecture: raw.architecture || {},
             researchPath: raw.research_path || raw.researchPath,
             researchUpdatedAt: raw.research_updated_at || raw.researchUpdatedAt,
+            mapGeneratedAt: raw.map_generated_at || raw.mapGeneratedAt,
+            mapReportPath: raw.map_report_path || raw.mapReportPath,
+            openspecDir: raw.openspec_dir || raw.openspecDir,
+            structuralChanges: (raw.structural_changes || raw.structuralChanges || []).map((sc: any) => ({
+                area: sc.area,
+                currentState: sc.current_state || sc.currentState || '',
+                proposedChange: sc.proposed_change || sc.proposedChange || '',
+                rationale: sc.rationale || '',
+                impact: sc.impact || 'medium',
+                affectedFiles: sc.affected_files || sc.affectedFiles || [],
+                breaking: sc.breaking === true,
+                agreed: sc.agreed === true,
+            })),
             planApproved: typeof raw.plan_approved === 'boolean'
                 ? raw.plan_approved
                 : (typeof raw.planApproved === 'boolean' ? raw.planApproved : undefined),

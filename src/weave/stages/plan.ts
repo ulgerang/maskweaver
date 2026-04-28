@@ -5,7 +5,7 @@
  * Generates testable MVPs per phase with clear completion criteria.
  */
 
-import type { WeavePhase, WeavePlan } from '../types.js';
+import type { WeavePhase, WeavePlan, StructuralChange } from '../types.js';
 import type { IntakeResult } from './intake.js';
 import { getPhaseManager } from '../phase-manager.js';
 import {
@@ -15,6 +15,7 @@ import {
     getGraphEdges,
     countGdcCheckIssues,
 } from '../gdc.js';
+import { generateOpenSpecArtifacts, ensureOpenSpecWorkspace } from './openspec.js';
 
 // ============================================================================
 // Types
@@ -546,6 +547,9 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
         ? `${projectName}: ${intake.features.slice(0, 3).join(', ')} 등의 기능을 제공하는 애플리케이션`
         : `${projectName} 애플리케이션`;
 
+    // Attach structural changes from intake
+    const structuralChanges = intake.structuralChanges?.filter(sc => sc.agreed) || [];
+
     // Calculate total estimated hours
     const estimatedTotalHours = phases.reduce((sum, p) => sum + (p.estimatedHours || 3), 0);
 
@@ -634,6 +638,18 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
         planRole: 'standalone',
     });
 
+    // Attach structural changes to plan
+    if (structuralChanges.length > 0) {
+        weavePlan.structuralChanges = structuralChanges;
+        await manager.savePlan(weavePlan);
+    }
+
+    // Attach map info if available
+    if (intake.codebaseMapPath) {
+        weavePlan.mapReportPath = intake.codebaseMapPath;
+        weavePlan.mapGeneratedAt = new Date().toISOString();
+    }
+
     // vNext: Generate a baseline executable task list per phase
     for (const phase of weavePlan.phases) {
         const tasks = generateDefaultPhaseTasks(phase, {
@@ -644,6 +660,21 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
         if (tasks.length > 0) {
             await manager.addTasks(phase.id, tasks);
         }
+    }
+
+    // Generate OpenSpec artifacts
+    try {
+        const changeId = weavePlan.planName || normalizedPlanName;
+        await ensureOpenSpecWorkspace(basePath || process.cwd());
+        const openspecResult = await generateOpenSpecArtifacts({
+            basePath: basePath || process.cwd(),
+            changeId,
+            plan: weavePlan,
+            overwrite: true,
+        });
+        weavePlan.openspecDir = openspecResult.changeDir;
+    } catch {
+        // OpenSpec generation is best-effort
     }
 
     // Generate summary
@@ -749,6 +780,33 @@ function generatePlanSummary(plan: WeavePlan, totalHours: number): string {
     if (plan.architecture.database) lines.push(`- Database: ${plan.architecture.database}`);
     if (plan.architecture.notes) lines.push(`- Note: ${plan.architecture.notes}`);
     lines.push('');
+
+    if (plan.structuralChanges && plan.structuralChanges.length > 0) {
+        lines.push('### ⚠️ 구조 변경 (User Approved)');
+        lines.push('');
+        for (const sc of plan.structuralChanges) {
+            const icon = sc.breaking ? '🔴' : '🟡';
+            lines.push(`- ${icon} **${sc.area}**`);
+            lines.push(`  - As-Is: ${sc.currentState}`);
+            lines.push(`  - To-Be: ${sc.proposedChange}`);
+            lines.push(`  - 영향: ${sc.impact}, Breaking: ${sc.breaking ? 'Yes' : 'No'}`);
+            if (sc.affectedFiles.length > 0) {
+                lines.push(`  - 영향 파일: ${sc.affectedFiles.join(', ')}`);
+            }
+        }
+        lines.push('');
+    }
+
+    if (plan.mapReportPath) {
+        lines.push(`> 📍 코드베이스 분석: ${plan.mapReportPath}`);
+        lines.push('');
+    }
+
+    if (plan.openspecDir) {
+        lines.push(`> 📄 OpenSpec artifacts: ${plan.openspecDir}`);
+        lines.push('');
+    }
+
     lines.push(`### Phase 계획`);
     lines.push('');
     lines.push('| Phase | 이름 | 완료 조건 | 예상 시간 |');
@@ -763,7 +821,8 @@ function generatePlanSummary(plan: WeavePlan, totalHours: number): string {
     lines.push(`**총 예상 시간**: ${totalHours}시간`);
     lines.push('');
     lines.push(`---`);
-    lines.push(`이 계획이 괜찮으세요? 수정이 필요하면 말씀해주세요.`);
+    lines.push(`위 계획을 승인하려면 \`/weave approve-plan\`을 실행해주세요.`);
+    lines.push(`승인 후 \`/weave build\`로 자율 실행을 시작합니다.`);
 
     return lines.join('\n');
 }

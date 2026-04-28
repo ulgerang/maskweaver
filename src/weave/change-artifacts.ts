@@ -31,6 +31,42 @@ export function toChangeContextPath(changeId: string, filename: string): string 
     return path.posix.join('.opencode', 'weave', 'changes', changeId, 'context', filename);
 }
 
+export function getMapDir(basePath: string): string {
+    return path.join(basePath, '.opencode', 'weave', 'map');
+}
+
+export function getMapResultPath(basePath: string): string {
+    return path.join(getMapDir(basePath), 'map-result.yaml');
+}
+
+export function getMapReportPath(basePath: string): string {
+    return path.join(getMapDir(basePath), 'map-report.md');
+}
+
+export function getGraphifyReportPath(basePath: string): string {
+    return path.join(getMapDir(basePath), 'graphify-report.html');
+}
+
+export function getOpenspecDir(basePath: string): string {
+    return path.join(basePath, 'openspec');
+}
+
+export function getOpenspecChangeDir(basePath: string, changeId: string): string {
+    return path.join(getOpenspecDir(basePath), 'changes', changeId);
+}
+
+export function toOpenspecChangePath(changeId: string, filename: string): string {
+    return path.posix.join('openspec', 'changes', changeId, filename);
+}
+
+export function getBuildStateDir(basePath: string): string {
+    return path.join(basePath, '.opencode', 'weave', 'build');
+}
+
+export function getBuildStatePath(basePath: string, buildId: string): string {
+    return path.join(getBuildStateDir(basePath), `${buildId}.yaml`);
+}
+
 export async function readChangeMetadata(
     basePath: string,
     changeId: string

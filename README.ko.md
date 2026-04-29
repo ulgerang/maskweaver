@@ -201,17 +201,17 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
 | 명령어 | 설명 |
 |--------|------|
 | `/weave init` | Weave 초기화 (프로젝트당 1회) |
-| `/weave research [docs]` | 문서 + 워크스페이스 맥락을 깊게 읽고 `tasks/research.md` 생성 |
-| `/weave prepare [docs]` | (수동 경로) research + baseline spec + phase plan 생성 (큰 계획은 자동 분할) |
+| `/weave prepare [docs]` | research + spec + plan을 한 번에 생성 (큰 계획은 자동 분할) |
 | `/weave refine-plan` | `tasks/plan-notes.md` 지시문을 active plan에 반영 |
-| `/weave approve-plan` | 구현 전 사람이 계획 승인(게이트) |
-| `/weave flow [docs]` | (권장) 원커맨드 경로: prepare -> auto-approve -> craft -> verify -> finalize |
-| `/weave spec [docs]` | baseline spec만 생성 (선택) |
-| `/weave design [docs]` | 요구사항 분석 → Phase 계획 생성 (`/weave plan`은 별칭/호환, 큰 계획은 자동 분할) |
+| `/weave approve` | 구현 전 사람이 계획 승인(게이트) |
 | `/weave craft [P#]` | Phase 실행 컨텍스트/가이드 생성 |
+| `/weave build` | 자율 빌드 루프 (`action=run/status/stop/list/resume/sync`) |
 | `/weave verify` | 빌드/테스트 검증 실행 (자동 감지) |
 | `/weave worktree ...` | git worktree 기반 병렬 작업 관리 |
 | `/weave status` | 프로젝트 진행 상황 및 통계 확인 |
+| `/weave agents` | 에이전트 파일 동기화 또는 설정 초기화 (`sync=true` / `init=true`) |
+| `/weave troubleshoot` | 글로벌 지식 검색 (`record=true`로 솔루션 저장) |
+| `/weave archive` | 검증된 변경사항 아카이브 |
 | `/weave help` | 도움말 표시 |
 
 > Tip: OpenCode 채팅에서는 `/weave ...` 형태로 실행하고, 내부적으로는 `weave command=...` 도구 호출로 매핑됩니다.
@@ -221,26 +221,21 @@ Weave는 Maskweaver의 핵심 워크플로우입니다. 작업을 테스트 가�
 ```
 0. INIT (1회): /weave init
        ↓
-1. 원커맨드(권장): /weave flow docs/
-    - 실행: prepare -> auto-approve -> craft -> verify -> finalize
+1. PLAN: /weave prepare docs/
+    - research + spec + phase plan을 한 번에 생성 (큰 계획은 자동 분할)
        ↓
-   (또는 수동 경로)
-       ↓
-2. PLAN (수동): /weave prepare docs/
-    - 또는: /weave research docs/ → /weave spec docs/ → /weave design docs/
-       ↓
-3. REFINE (선택): /weave refine-plan
+2. REFINE (선택): /weave refine-plan
     - tasks/plan-notes.md 기반 계획 정제
        ↓
-4. APPROVAL GATE: /weave approve-plan
+3. APPROVAL GATE: /weave approve
     - craft 실행 전 필수 승인
        ↓
-5. CRAFT: /weave craft
+4. CRAFT: /weave craft
      - Phase 실행 계획과 다음 액션 안내 생성
-     - 구현/검증 후 approve-plan으로 phase 완료 처리
+     - 구현/검증 후 approve로 phase 완료 처리
      - `/weave verify`로 빌드/테스트 검증 가능
        ↓
-6. HANDOFF: 유저가 UX/의도 확인 후 다음 Phase로 진행
+5. HANDOFF: 유저가 UX/의도 확인 후 다음 Phase로 진행
 ```
 
 #### 다층 AI 검증 시스템
@@ -416,30 +411,18 @@ import { WeaveOrchestrator, GlobalKnowledge } from 'maskweaver/weave';
 /weave init
 ```
 
-### 1단계: 플랜 생성 (Flow 권장)
+### 1단계: 플랜 생성
 
-가장 빠른 원커맨드 경로:
-
-```bash
-/weave flow docs/
-```
-
-한 번에 `prepare -> auto-approve -> craft -> verify -> finalize`까지 실행합니다.
-
-수동 happy path (research + spec + plan 한 번에):
+research + spec + plan을 한 번에 생성:
 
 ```bash
 /weave prepare docs/
-/weave approve-plan
 ```
 
-또는 전체 파이프라인을 분리해서 실행:
+그 다음 계획을 승인합니다:
 
 ```bash
-/weave research docs/
-/weave spec docs/
-/weave design docs/
-/weave approve-plan
+/weave approve
 ```
 
 AI가 수행하는 작업:
@@ -468,7 +451,7 @@ AI 인사이트가 포함된 현대적 감정 일기 앱 구축
 ### 2단계: 계획 승인(필수)
 
 ```bash
-/weave approve-plan
+/weave approve
 ```
 
 ### 3단계: Phase 실행 계획 생성 (Craft)
@@ -488,17 +471,17 @@ weave command=craft phaseId="P1"
 weave command=verify
 ```
 
-원커맨드로 이어서 진행하려면:
+자율 빌드 루프:
 
 ```txt
-weave command=flow
+weave command=build action=run phaseIds="P1,P2"
 ```
 
 ### 5단계: Phase 완료 처리
 
 ```txt
 weave command=verify
-weave command=approve-plan
+weave command=approve
 ```
 
 ### 6단계: 핸드오프 & 검증

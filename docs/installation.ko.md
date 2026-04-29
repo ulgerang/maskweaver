@@ -812,7 +812,7 @@ EOF
 > - 일반 대화: 평소처럼 질문하세요
 > - 전문가 모드: '리누스 토발즈처럼 코드 리뷰해줘'라고 요청하세요
 > - `/weave help` - Weave 워크플로우 도움말
-> - `/weave design docs/` - Phase 기반 개발 시작"
+> - `/weave prepare docs/` - Phase 기반 개발 시작"
 
 ### LLM 에이전트 주의사항
 
@@ -829,38 +829,40 @@ EOF
 
 ## Weave 워크플로우 (v0.8+)
 
-설치 완료 후, **Weave v0.8 워크플로우**를 사용해보세요. 리서치 우선과 승인 게이트가 새로 추가되었습니다:
+설치 완료 후, **Weave v0.8+ 워크플로우**를 사용필보세요:
 
-```bash
-# 1. 문서를 깊게 읽고 리서치 아티팩트 생성
-/weave research docs/
-
-# 2. 리서치 + spec + 계획 생성
+`ash
+# 1. research + spec + 계획을 한 번에 생성
 /weave prepare docs/
 
-# 3. (선택) 노트로 계획 정제
+# 2. (선택) 노트로 계획 정제
 /weave refine-plan
 
-# 4. (필수) 구현 전 계획 승인
-/weave approve-plan
+# 3. (필수) 구현 전 계획 승인
+/weave approve
 
-# 5. 자동 검증으로 Phase 실행
-/weave craft P1
+# 4. Phase 실행 컨텍스트 준비
+/weave craft
+
+# 5. (선택) 자율 빌드 루프 실행
+/weave build action=run
 
 # 6. 언제든 진행 상황 확인
 /weave status
-```
+`
 
-**v0.8 신규 기능:**
-- 📝 **리서치 우선**: 계획 전 문서 심층 분석
-- 🔒 **승인 게이트**: 구현 전 계획 승인 필수
-- ✏️ **Annotation cycle**: `tasks/plan-notes.md` 지시문으로 계획 정제
+**명령어 통합 (v0.8.16+):**
+- 📝 **prepare**: 
+esearch + spec + design을 하나로 통합
+- 🔒 **approve**: pprove-plan을 대체
+- 🔨 **build**: 루프 명령 통합 (ction=run/status/stop/list/resume/sync)
+- 🤖 **agents**: sync-agents와 init-config를 대체
+- 🩹 **troubleshoot**: 
+ecord를 --record 플래그로 흡수
+- ✏️ **Annotation cycle**: 	asks/plan-notes.md 지시문으로 계획 정제
 - 🎭 **마스크 자동 선택**: AI 가 각 작업에 최적의 전문가 선택
 - ✅ **다층 검증**: Build → Test → E2E → Visual → A11y
 - 🧠 **글로벌 지식**: 프로젝트 간 트러블슈팅 솔루션
-
-
----
 
 ## 다음 단계
 

@@ -1117,7 +1117,7 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory, project, wor
 
   // Slashcommand tool (handles /weave etc. on first run without restart)
   if (isToolActive('slashcommand')) {
-    const slashcommandTool = createSlashcommandTool();
+    const slashcommandTool = createSlashcommandTool(getAssetsDir());
     tools.slashcommand = {
       description: slashcommandTool.description,
       args: wrapSchema(slashcommandTool.args) as any,
@@ -1214,4 +1214,7 @@ ${buildRichPrompt(state.activeMask)}
   };
 };
 
-export default MaskweaverPlugin;
+export default {
+  id: 'maskweaver',
+  server: MaskweaverPlugin,
+};

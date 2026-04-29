@@ -220,17 +220,17 @@ Weave is Maskweaver's flagship workflow. It breaks work into testable phases, au
 | Command | Description |
 |---------|-------------|
 | `/weave init` | Initialize Weave (once per repo) |
-| `/weave research [docs]` | Deep-read docs + workspace context and generate persistent `tasks/research.md` |
-| `/weave prepare [docs]` | (Manual path) Generate research + baseline spec + phase plan (auto-split if oversized) |
+| `/weave prepare [docs]` | Generate research + spec + plan in one step (auto-split if oversized) |
 | `/weave refine-plan` | Apply structured plan notes (`tasks/plan-notes.md`) to active plan |
-| `/weave approve-plan` | Explicit human approval gate before implementation |
-| `/weave flow [docs]` | (Recommended) One-command path: prepare -> auto-approve -> craft -> verify -> finalize |
-| `/weave spec [docs]` | Generate baseline spec only (optional) |
-| `/weave design [docs]` | Analyze requirements → Generate phase plan (`/weave plan` alias, auto-split if oversized) |
+| `/weave approve` | Explicit human approval gate before implementation |
 | `/weave craft [P#]` | Prepare phase execution context and guidance |
+| `/weave build` | Autonomous build loop (`action=run/status/stop/list/resume/sync`) |
 | `/weave verify` | Run build/test verification (auto-detect) |
 | `/weave worktree ...` | Manage git worktrees for parallel work |
 | `/weave status` | View project progress and stats |
+| `/weave agents` | Sync agent files or init config (`sync=true` / `init=true`) |
+| `/weave troubleshoot` | Search global knowledge (`record=true` to save a solution) |
+| `/weave archive` | Archive the verified active change |
 | `/weave help` | Show documentation |
 
 > Tip: In OpenCode chat you can use `/weave ...` commands, and they map to the underlying `weave command=...` tool calls.
@@ -240,26 +240,21 @@ Weave is Maskweaver's flagship workflow. It breaks work into testable phases, au
 ```
 0. INIT (once): /weave init
        ↓
-1. ONE-COMMAND (recommended): /weave flow docs/
-    - runs: prepare -> auto-approve -> craft -> verify -> finalize
+1. PLAN: /weave prepare docs/
+    - Generates research + spec + phase plan (auto-splits if oversized)
        ↓
-   (or manual path)
-       ↓
-2. PLAN (manual path): /weave prepare docs/
-    - or: /weave research docs/ → /weave spec docs/ → /weave design docs/
-       ↓
-3. REFINE (optional): /weave refine-plan
+2. REFINE (optional): /weave refine-plan
     - apply annotation notes from tasks/plan-notes.md
        ↓
-4. APPROVAL GATE: /weave approve-plan
+3. APPROVAL GATE: /weave approve
     - required before craft execution
        ↓
-5. CRAFT: /weave craft
+4. CRAFT: /weave craft
      - Generates an execution plan and next actions
-     - Implement/verify changes, then finalize with approve-plan
+     - Implement/verify changes, then finalize with approve
      - Use `/weave verify` anytime for build/test checks
        ↓
-6. HANDOFF: You validate UX/intent and move to next phase
+5. HANDOFF: You validate UX/intent and move to next phase
 ```
 
 #### Multi-Layer AI Verification
@@ -447,30 +442,18 @@ import { WeaveOrchestrator, GlobalKnowledge } from 'maskweaver/weave';
 /weave init
 ```
 
-### Step 1: Create a Plan (Flow Recommended)
+### Step 1: Create a Plan
 
-Fastest path (one command):
-
-```bash
-/weave flow docs/
-```
-
-This runs `prepare -> auto-approve -> craft -> verify -> finalize` in one shot.
-
-Manual happy path (research + spec + plan in one command):
+Generate research + spec + plan in one command:
 
 ```bash
 /weave prepare docs/
-/weave approve-plan
 ```
 
-Or run the full pipeline separately:
+Then approve the plan:
 
 ```bash
-/weave research docs/
-/weave spec docs/
-/weave design docs/
-/weave approve-plan
+/weave approve
 ```
 
 The AI will:
@@ -499,7 +482,7 @@ Is this plan okay? Let me know if changes are needed.
 ### Step 2: Approve the Plan (Required)
 
 ```bash
-/weave approve-plan
+/weave approve
 ```
 
 ### Step 3: Craft a Phase (Auto-select if omitted)
@@ -519,17 +502,17 @@ weave command=craft phaseId="P1"
 weave command=verify
 ```
 
-One-command resume:
+Autonomous build loop:
 
 ```txt
-weave command=flow
+weave command=build action=run phaseIds="P1,P2"
 ```
 
 ### Step 5: Finalize the Phase
 
 ```txt
 weave command=verify
-weave command=approve-plan
+weave command=approve
 ```
 
 ### Step 6: Handoff & Validate

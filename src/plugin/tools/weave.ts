@@ -79,6 +79,7 @@ import {
     writeDefaultRuntimeConfig,
     writeDefaultPluginConfig,
 } from '../../shared/generate-agents.js';
+import { resolveCommand, loadCommandsJson, type CommandEntry } from './command-registry.js';
 
 // ============================================================================
 // Tool Factory
@@ -86,63 +87,38 @@ import {
 
 export function createWeaveTool() {
     return {
-        description: `Weave: Phase-driven development workflow with expert mask auto-selection and cross-project knowledge sharing.
-
-Commands:
-- init: Initialize weave workspace files and probe GDC integration
-- map [deep]: Analyze codebase structure via GDC + Graphify (knowledge graph)
-- interview [docsPath]: Multi-step question asking until clarity, with structural change detection
-- research [docsPath]: Deep-read docs + workspace context and write persistent research.md
-- spec [docsPath]: Generate baseline spec (requirements + AC)
-- design [docsPath]: Analyze requirements and create phase-based plan (auto-splits oversized plans)
-- prepare [docsPath]: Create research + spec + plan with defaults (auto-splits oversized plans)
-- refine-plan: Apply annotation notes to active plan
-- approve-plan: Approve the plan, or finalize a crafted phase when phaseId is provided
-- flow [docsPath]: One-command path (prepare -> auto-approve -> craft -> verify -> finalize)
-- craft [phaseId]: Prepare execution context for a phase (phase auto-select if omitted)
-- build [phaseIds]: Ralph-loop autonomous execution — runs approved plan until all tasks complete (no user intervention)
-- build-resume [buildId]: Resume a previously blocked build
-- status: View overall progress
-- worktree: Manage git worktrees for parallel work
-- verify: Run build/test verification for current worktree
-- archive: Archive the verified active change artifact
-- loop-run: Run a bounded loop for the active change until verify passes or the run blocks
-- loop-start: Create a loop run without executing it
-- loop-status: Inspect a loop run by loopId
-- loop-stop: Request a semantic stop for a loop run
-- loop-list: List known loop runs
-- loop-sync: Sync delegated squad results back into a loop run
-- loop-watchdog: Poll loop delegation sessions and auto-sync completed runs
-- loop-poll: Bounded wait loop that watches delegated work and resumes automatically
-- loop-operator: Recurring operator run for delegated loops (automation-friendly)
-- troubleshoot [error]: Search global knowledge for solutions
-- record [solution]: Record a troubleshooting solution
-- repair: Scan and auto-repair corrupted plan YAML files
-- sync-agents: Force regenerate dummy-human agent .md files from maskweaver.config.json pool (reads project config first, falls back to ~/.config/opencode/maskweaver.config.json)
-- init-config: Create default maskweaver.config.json with pool template (does not overwrite existing)
-
-Examples:
-- weave init
-- weave research docs/
-- weave design docs/
-- weave refine-plan
-- weave approve-plan
-- weave craft P1
-- weave loop-run
-- weave loop-status loopId="docs-p1-loop-r1"
-- weave status
-- weave repair
-- weave sync-agents
-- weave init-config
-- weave troubleshoot "Cannot find module 'xyz'"`,
+        description: (() => {
+            const registry = loadCommandsJson();
+            const lines: string[] = [
+                'Weave: Phase-driven development workflow with expert mask auto-selection and cross-project knowledge sharing.',
+                '',
+                'Commands:',
+            ];
+            for (const cmd of registry.commands) {
+                const aliasText = cmd.aliases.length > 0 ? ` (aliases: ${cmd.aliases.join(', ')})` : '';
+                lines.push(`- ${cmd.name}${aliasText}: ${cmd.description}`);
+            }
+            lines.push('');
+            lines.push('Examples:');
+            for (const ex of registry.commands.flatMap((c: CommandEntry) => c.examples).slice(0, 12)) {
+                lines.push(`- ${ex}`);
+            }
+            return lines.join('\n');
+        })(),
 
         args: {
-            command: z.enum(['init', 'map', 'interview', 'research', 'spec', 'design', 'prepare', 'refine-plan', 'approve-plan', 'flow', 'craft', 'build', 'build-resume', 'status', 'worktree', 'verify', 'archive', 'loop-run', 'loop-start', 'loop-step', 'loop-status', 'loop-stop', 'loop-list', 'loop-sync', 'loop-watchdog', 'loop-poll', 'loop-operator', 'troubleshoot', 'record', 'help', 'repair', 'sync-agents', 'init-config'])
-                .describe('Weave command to execute'),
+            command: z.string()
+                .describe('Weave command to execute. Run "help" for full list.'),
+            action: z.enum(['run', 'status', 'stop', 'list', 'resume', 'sync']).optional()
+                .describe('Build sub-action (for build command)'),
+            sync: z.boolean().optional()
+                .describe('Force regenerate agent .md files from config pool (for agents command)'),
+            init: z.boolean().optional()
+                .describe('Create default maskweaver.config.json with pool template (for agents command)'),
             docsPath: z.string().optional()
                 .describe('Path to requirements documents (for design command)'),
             phaseId: z.string().optional()
-                .describe('Phase ID (used by craft and approve-plan finalize flow)'),
+                .describe('Phase ID (used by craft and approve finalize flow)'),
             projectName: z.string().optional()
                 .describe('Project name (for design command)'),
             planName: z.string().optional()
@@ -154,11 +130,11 @@ Examples:
             splitMaxHours: z.number().int().min(4).max(40).optional()
                 .describe('Max estimated hours per shard when splitPlans is enabled (default: 10)'),
             planReview: z.string().optional()
-                .describe('Plan review summary text (for approve-plan command)'),
+                .describe('Plan review summary text (for approve command)'),
             notesPath: z.string().optional()
                 .describe('Path to structured plan notes (default: tasks/plan-notes.md)'),
             applyNotes: z.boolean().optional()
-                .describe('Auto-apply plan notes during approve-plan (default: true)'),
+                .describe('Auto-apply plan notes during approve (default: true)'),
             worktreeAction: z.enum(['create', 'list', 'open', 'remove', 'merge']).optional()
                 .describe('Worktree action (for worktree command)'),
             name: z.string().optional()
@@ -213,7 +189,10 @@ Examples:
 
         execute: async (
             args: {
-                command: 'init' | 'map' | 'interview' | 'research' | 'spec' | 'design' | 'prepare' | 'refine-plan' | 'approve-plan' | 'flow' | 'craft' | 'build' | 'build-resume' | 'status' | 'worktree' | 'verify' | 'archive' | 'loop-run' | 'loop-start' | 'loop-step' | 'loop-status' | 'loop-stop' | 'loop-list' | 'loop-sync' | 'loop-watchdog' | 'loop-poll' | 'loop-operator' | 'troubleshoot' | 'record' | 'help' | 'repair' | 'sync-agents' | 'init-config';
+                command: string;
+                action?: 'run' | 'status' | 'stop' | 'list' | 'resume' | 'sync';
+                sync?: boolean;
+                init?: boolean;
                 docsPath?: string;
                 phaseId?: string;
                 projectName?: string;
@@ -255,110 +234,86 @@ Examples:
             const { command } = args;
             const basePath = context.worktree;
 
+            // Resolve command aliases and deprecation
+            const resolved = resolveCommand(command);
+            if ('error' in resolved) {
+                return `Error: ${resolved.error}`;
+            }
+            const { command: resolvedCmd, warning: deprecationWarning } = resolved;
+
+            const prefixWarning = deprecationWarning ? `${deprecationWarning}\n\n` : '';
+
             try {
-                switch (command) {
+                let result: string;
+                switch (resolvedCmd) {
                     case 'init':
-                        return await handleInit(basePath);
+                        result = await handleInit(basePath);
+                        break;
 
                     case 'map':
-                        return await handleMap(args, basePath);
+                        result = await handleMap(args, basePath);
+                        break;
 
                     case 'interview':
-                        return await handleInterview(args, basePath);
-
-                    case 'build':
-                        return await handleBuild(args, basePath);
-
-                    case 'build-resume':
-                        return await handleBuildResume(args, basePath);
-
-                    case 'research':
-                        return await handleResearch(args, basePath);
-
-                    case 'spec':
-                        return await handleSpec(args, basePath);
-
-                    case 'design':
-                        return await handleDesign(args, basePath);
+                        result = await handleInterview(args, basePath);
+                        break;
 
                     case 'prepare':
-                        return await handlePrepare(args, basePath);
+                        result = await handlePrepare(args, basePath);
+                        break;
 
                     case 'refine-plan':
-                        return await handleRefinePlan(args, basePath);
+                        result = await handleRefinePlan(args, basePath);
+                        break;
 
-                    case 'approve-plan':
-                        return await handleApprovePlan(args, basePath);
-
-                    case 'flow':
-                        return await handleFlow(args, basePath);
+                    case 'approve':
+                        result = await handleApprovePlan(args, basePath);
+                        break;
 
                     case 'craft':
-                        return await handleCraft(args, basePath);
+                        result = await handleCraft(args, basePath);
+                        break;
+
+                    case 'build':
+                        result = await handleBuildUnified(args, basePath);
+                        break;
 
                     case 'status':
-                        return await handleStatus(basePath);
+                        result = await handleStatus(basePath);
+                        break;
 
                     case 'worktree':
-                        return await handleWorktree(args, basePath);
+                        result = await handleWorktree(args, basePath);
+                        break;
 
                     case 'verify':
-                        return await handleVerify(args, basePath);
+                        result = await handleVerify(args, basePath);
+                        break;
 
                     case 'archive':
-                        return await handleArchive(basePath);
-
-                    case 'loop-run':
-                        return await handleLoopRun(args, basePath);
-
-                    case 'loop-start':
-                        return await handleLoopStart(args, basePath);
-
-                    case 'loop-step':
-                        return await handleLoopStep(args, basePath);
-
-                    case 'loop-status':
-                        return await handleLoopStatus(args, basePath);
-
-                    case 'loop-stop':
-                        return await handleLoopStop(args, basePath);
-
-                    case 'loop-list':
-                        return await handleLoopList(basePath);
-
-                    case 'loop-sync':
-                        return await handleLoopSync(args, basePath);
-
-                    case 'loop-watchdog':
-                        return await handleLoopWatchdog(args, basePath);
-
-                    case 'loop-poll':
-                        return await handleLoopPoll(args, basePath);
-
-                    case 'loop-operator':
-                        return await handleLoopOperator(args, basePath);
+                        result = await handleArchive(basePath);
+                        break;
 
                     case 'troubleshoot':
-                        return await handleTroubleshoot(args);
-
-                    case 'record':
-                        return await handleRecord(args);
+                        result = await handleTroubleshoot(args);
+                        break;
 
                     case 'repair':
-                        return await handleRepair(basePath);
+                        result = await handleRepair(basePath);
+                        break;
 
-                    case 'sync-agents':
-                        return await handleSyncAgents(basePath);
-
-                    case 'init-config':
-                        return await handleInitConfig(basePath);
+                    case 'agents':
+                        result = await handleAgents(args, basePath);
+                        break;
 
                     case 'help':
-                        return getHelpMessage();
+                        result = getHelpMessage();
+                        break;
 
                     default:
-                        return `Error: Unknown command: ${command}. Use 'help' for available commands.`;
+                        result = `Error: Unknown command: ${command}. Use 'help' for available commands.`;
                 }
+                return prefixWarning + result;
             } catch (e) {
                 const error = e instanceof Error ? e.message : String(e);
                 return `Error: Weave error: ${error}`;
@@ -961,7 +916,7 @@ function formatPlanApprovalRequired(
         `- Review research: \`${researchPath}\``,
         `- Review plan: \`${planPath}\``,
         '- (Optional) Apply note directives: `weave command=refine-plan`',
-        '- Then run: `weave command=approve-plan`',
+        '- Then run: `weave command=approve`',
     ].join('\n');
 }
 
@@ -1697,7 +1652,7 @@ async function handleRefinePlan(
     return [
         formatRefinePlanResult('## 📝 Plan Refined From Notes', outcome),
         '',
-        'Review the updated plan, then run: `weave command=approve-plan`',
+        'Review the updated plan, then run: `weave command=approve`',
     ].join('\n');
 }
 
@@ -1764,7 +1719,7 @@ async function handleApprovePlan(
                 formatRefinePlanResult('## 📝 Plan Refined During Approve', outcome),
                 '',
                 'Approval paused after applying note directives.',
-                'Review the updated plan and rerun: `weave command=approve-plan`',
+                'Review the updated plan and rerun: `weave command=approve`',
             ].join('\n');
         }
     }
@@ -1885,7 +1840,7 @@ async function handleDesign(
         '',
         '---',
         '계획을 검토하고 구현 전에 승인하세요:',
-        '- `weave command=approve-plan`',
+        '- `weave command=approve`',
     ].join('\n');
 }
 
@@ -1940,33 +1895,61 @@ async function handlePrepare(
     const resolvedDocsPath = resolveUnderBase(basePath, docsPath);
     const intakeResult = await intake({ docsPath: resolvedDocsPath });
     const gdcPrepareSync = await runGdcPrepareSync(basePath);
-    const researchResult = await writeResearchReport({
-        docsPath: resolvedDocsPath,
-        intake: intakeResult,
-        basePath,
-        projectName: projectName || 'My Project',
-    });
 
     const normalizedPlanName = normalizePlanName(args.planName, projectName, resolvedDocsPath);
 
-    // Step 2: Spec (baseline)
-    const specResult = await createSpec({
-        intake: intakeResult,
-        projectName: projectName || 'My Project',
-        specName: normalizedPlanName,
-        basePath,
-    });
+    // Cache-aware skip: skip steps if artifacts already exist
+    const researchPath = path.join(basePath, 'tasks', 'research.md');
+    const specsDir = path.join(basePath, '.opencode', 'weave', 'specs');
+    const plansDir = path.join(basePath, '.opencode', 'weave', 'plans');
 
-    // Prepare is the default "happy path": proceed with reasonable defaults.
-    const planResult = await plan({
-        intake: intakeResult,
-        projectName: projectName || 'My Project',
-        planName: normalizedPlanName,
-        basePath,
-        splitPlans: args.splitPlans,
-        splitMaxPhases: args.splitMaxPhases,
-        splitMaxHours: args.splitMaxHours,
-    });
+    const hasResearch = fs.existsSync(researchPath);
+    const hasSpec = (() => {
+        try {
+            return fs.readdirSync(specsDir).some(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+        } catch { return false; }
+    })();
+    const hasPlan = (() => {
+        try {
+            return fs.readdirSync(plansDir).some(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+        } catch { return false; }
+    })();
+
+    // Step 1: Research
+    const researchResult = hasResearch
+        ? {
+            summary: `> ⏭️ Research skipped: \`${toWorkspaceRelative(basePath, researchPath)}\` already exists.`,
+            reportPath: researchPath,
+        }
+        : await writeResearchReport({
+            docsPath: resolvedDocsPath,
+            intake: intakeResult,
+            basePath,
+            projectName: projectName || 'My Project',
+        });
+
+    // Step 2: Spec (baseline)
+    const specResult = hasSpec
+        ? { summary: `> ⏭️ Spec skipped: existing artifact found in \`${toWorkspaceRelative(basePath, specsDir)}\`.` }
+        : await createSpec({
+            intake: intakeResult,
+            projectName: projectName || 'My Project',
+            specName: normalizedPlanName,
+            basePath,
+        });
+
+    // Step 3: Plan
+    const planResult = hasPlan
+        ? { summary: `> ⏭️ Plan skipped: existing artifact found in \`${toWorkspaceRelative(basePath, plansDir)}\`.` }
+        : await plan({
+            intake: intakeResult,
+            projectName: projectName || 'My Project',
+            planName: normalizedPlanName,
+            basePath,
+            splitPlans: args.splitPlans,
+            splitMaxPhases: args.splitMaxPhases,
+            splitMaxHours: args.splitMaxHours,
+        });
 
     await updateActivePlanReviewMetadata(basePath, {
         researchPath: researchResult.reportPath,
@@ -2001,7 +1984,7 @@ async function handlePrepare(
 
     lines.push('\n---\n');
     lines.push('다음 단계 (구현 전 승인 필수):');
-    lines.push('`weave command=approve-plan`');
+    lines.push('`weave command=approve`');
     lines.push('그 다음 `weave craft P1` 또는 `weave flow`');
 
     return lines.join('\n');
@@ -2322,7 +2305,7 @@ async function handleInterview(
                 lines.push(`  - Status: ${sc.agreed ? '✅ Agreed' : '⏳ Pending approval'}`);
             }
             lines.push('');
-            lines.push('To proceed, agree to structural changes via `weave command=approve-plan`.');
+            lines.push('To proceed, agree to structural changes via `weave command=approve`.');
             lines.push('');
         }
 
@@ -2361,7 +2344,7 @@ async function handleBuild(
     }
 
     if (!plan.planApproved) {
-        return 'Error: Plan not approved. Run `weave command=approve-plan` first.';
+        return 'Error: Plan not approved. Run `weave command=approve` first.';
     }
 
     lines.push(`Plan: **${plan.projectName}** (approved at ${plan.planApprovedAt || 'N/A'})`);
@@ -2573,7 +2556,7 @@ async function handleCraft(
     lines.push('');
     lines.push('- Implement/delegate the phase work using the execution plan above.');
     lines.push('- Run verification: `weave command=verify` (or your project test/build commands).');
-    lines.push(`- Finalize the phase when ready: \`weave command=approve-plan phaseId="${resolvedPhaseId}"\``);
+    lines.push(`- Finalize the phase when ready: \`weave command=approve phaseId="${resolvedPhaseId}"\``);
     lines.push('- Check overall progress anytime: `weave command=status`.');
 
     await syncWorkflowArtifacts(basePath, manager, {
@@ -2836,17 +2819,25 @@ async function handleVerify(
     return verification.report;
 }
 
-async function handleTroubleshoot(args: { error?: string; projectType?: string }): Promise<string> {
+async function handleTroubleshoot(args: { error?: string; solution?: string; context?: string; projectType?: string; record?: boolean }): Promise<string> {
+    // Unified: record mode (absorbs old 'record' command)
+    if (args.record) {
+        if (!args.error || !args.solution) {
+            return 'Error: error and solution are required when record=true. Example: weave command=troubleshoot record=true error="..." solution="..."';
+        }
+        return handleRecord(args);
+    }
+
     const { error, projectType } = args;
 
     if (!error) {
-        return 'Error: error is required for troubleshoot command';
+        return 'Error: error is required for troubleshoot command. Example: weave command=troubleshoot error="Cannot find module \'xyz\'"';
     }
 
     const solutions = await searchTroubleshooting(error, { projectType, limit: 5 });
 
     if (solutions.length === 0) {
-        return '유사한 해결책을 찾지 못했습니다.\n\n문제를 해결하신 후, `weave record`로 해결책을 기록해주세요.';
+        return '유사한 해결책을 찾지 못했습니다.\n\n문제를 해결하신 후, `weave command=troubleshoot record=true solution="..."`로 해결책을 기록해주세요.';
     }
 
     const lines: string[] = ['## 💡 유사한 해결책 발견\n'];
@@ -2984,6 +2975,79 @@ async function handleInitConfig(basePath: string): Promise<string> {
     lines.push('>   with your model pool, then run `weave sync-agents` in any project to apply it.');
 
     return lines.join('\n');
+}
+
+// ============================================================================
+// Unified Build Handler (absorbs build, build-resume, loop-*)
+// ============================================================================
+
+async function handleBuildUnified(
+    args: {
+        action?: 'run' | 'status' | 'stop' | 'list' | 'resume' | 'sync';
+        phaseIds?: string;
+        buildId?: string;
+        loopId?: string;
+        projectType?: string;
+        verifyMode?: 'quick' | 'full';
+        maxRetries?: number;
+        maxIterations?: number;
+        maxNoProgress?: number;
+        pollIntervalMs?: number;
+        pollCycles?: number;
+    },
+    basePath: string
+): Promise<string> {
+    const action = args.action || 'run';
+    switch (action) {
+        case 'run':
+            return handleBuild(args, basePath);
+        case 'resume':
+            return handleBuildResume(args, basePath);
+        case 'status': {
+            const loopId = args.buildId || args.loopId;
+            if (!loopId) return 'Error: buildId or loopId is required for status action. Example: weave command=build action=status buildId="build-20250428-a1b2"';
+            return handleLoopStatus({ loopId }, basePath);
+        }
+        case 'stop': {
+            const loopId = args.buildId || args.loopId;
+            if (!loopId) return 'Error: buildId or loopId is required for stop action. Example: weave command=build action=stop buildId="build-20250428-a1b2"';
+            return handleLoopStop({ loopId, context: undefined }, basePath);
+        }
+        case 'list':
+            return handleLoopList(basePath);
+        case 'sync': {
+            const loopId = args.buildId || args.loopId;
+            if (!loopId) return 'Error: buildId or loopId is required for sync action. Example: weave command=build action=sync buildId="build-20250428-a1b2"';
+            return handleLoopSync({ loopId }, basePath);
+        }
+        default:
+            return `Error: Unknown build action: ${action}. Available: run, status, stop, list, resume, sync.`;
+    }
+}
+
+// ============================================================================
+// Agents Handler (absorbs sync-agents, init-config)
+// ============================================================================
+
+async function handleAgents(
+    args: {
+        sync?: boolean;
+        init?: boolean;
+    },
+    basePath: string
+): Promise<string> {
+    if (!args.sync && !args.init) {
+        return 'Error: agents requires an action. Use `sync=true` to regenerate agent files, or `init=true` to create default config.';
+    }
+
+    const sections: string[] = [];
+    if (args.sync) {
+        sections.push(await handleSyncAgents(basePath));
+    }
+    if (args.init) {
+        sections.push(await handleInitConfig(basePath));
+    }
+    return sections.join('\n\n---\n\n');
 }
 
 async function handleArchive(basePath: string): Promise<string> {
@@ -3702,7 +3766,7 @@ async function maybeAdvanceToNextShard(
     return [
         `Auto-switched to shard plan: \`${nextPlan.planName}\` (${shardLabel}).`,
         'Review/approve this shard before implementation:',
-        '- `weave command=approve-plan`',
+        '- `weave command=approve`',
         '- `weave command=craft`',
     ].join('\n');
 }
@@ -3917,6 +3981,14 @@ async function handleApprove(
 }
 
 function getHelpMessage(): string {
+    const registry = loadCommandsJson();
+    const commandRows = registry.commands
+        .map(cmd => {
+            const aliasText = cmd.aliases.length > 0 ? ` (${cmd.aliases.join(', ')})` : '';
+            return `| \`weave ${cmd.name}\`${aliasText} | ${cmd.description} |`;
+        })
+        .join('\n  ');
+
     return `## Weave Workflow Help (Maskweaver v${VERSION})
 
 **Weave** is Maskweaver's Phase-Driven Development workflow.
@@ -3935,33 +4007,7 @@ To check installed version:
 
   | Command | Description |
   |---------|-------------|
-  | \`weave init\` | Initialize weave workspace (.ignore + state/plans) and probe GDC |
-  | \`weave research [docs]\` | Deep-read docs + workspace context and write persistent research.md |
-  | \`weave spec [docs]\` | Generate baseline spec (requirements + AC) |
-  | \`weave prepare [docs]\` | Create spec + phase plan (auto-splits oversized plans) |
-  | \`weave refine-plan\` | Apply structured plan-note directives to active plan |
-  | \`weave approve-plan\` | Approve plan, or finalize a phase with \`phaseId\` |
-  | \`weave flow [docs]\` | One-command path (prepare -> auto-approve -> craft -> verify -> finalize) |
-  | \`weave design [docs]\` | Analyze requirements and create phase plan (auto-splits oversized plans) |
-  | \`weave craft [id]\` | Prepare execution context for a phase |
-  | \`weave status\` | View progress |
-  | \`weave worktree ...\` | Manage git worktrees for parallel work |
-  | \`weave verify\` | Run build/test verification for current worktree |
-  | \`weave archive\` | Archive the verified active change artifact |
-  | \`weave loop-run\` | Create and execute a bounded loop for the active change |
-  | \`weave loop-start\` | Create a loop run without executing it |
-  | \`weave loop-step\` | Execute one loop iteration for an existing loopId |
-  | \`weave loop-status\` | Inspect a loop run by loopId |
-  | \`weave loop-stop\` | Request a semantic stop for a loop run |
-  | \`weave loop-list\` | List known loop runs |
-  | \`weave loop-sync\` | Pull delegated squad results back into a loop run |
-  | \`weave loop-watchdog\` | Scan delegated loops and auto-sync completed runs |
-  | \`weave loop-poll\` | Bounded wait loop for delegated completion |
-  | \`weave loop-operator\` | Recurring operator run with state + lock artifacts |
-  | \`weave repair\` | Scan and auto-repair corrupted plan YAML files |
-  | \`weave troubleshoot [error]\` | Search global knowledge for solutions |
-  | \`weave record [solution]\` | Record a new solution |
-  | \`weave help\` | Show this help |
+  ${commandRows}
 
 ### Key Features
 
@@ -3976,16 +4022,14 @@ To check installed version:
 weave init                                               # Initialize weave + probe GDC
 weave prepare docs/                                      # Research + spec + plan
 weave refine-plan                                        # Apply plan-notes directives (optional)
-weave approve-plan                                       # Explicit approval gate
-weave approve-plan phaseId="P1"                          # Finalize crafted phase P1
-weave flow                                               # One-shot: prepare/approve/craft/verify/finalize
+weave approve                                            # Explicit approval gate
+weave approve phaseId="P1"                               # Finalize crafted phase P1
 weave craft                                              # Prepare current phase execution context
-weave loop-run                                           # Run bounded loop for the active change
-weave loop-status loopId="docs-p1-loop-r1"               # Inspect a specific loop run
-weave loop-sync loopId="docs-p1-loop-r1"                 # Resume after delegated workers finish
-weave loop-watchdog                                      # Scan all delegated loops once
-weave loop-poll loopId="docs-p1-loop-r1"                 # Wait for delegated completion and resume automatically
-weave loop-operator                                      # Automation-friendly recurring operator pass
+weave build                                              # Ralph-loop autonomous execution
+weave build action=status buildId="..."                  # Inspect a specific build
+weave build action=resume buildId="..."                  # Resume a blocked build
+weave status                                             # View overall progress
+weave verify                                             # Run build/test verification
 weave archive                                            # Archive verified active change
 \`\`\`
 `;

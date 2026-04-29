@@ -835,7 +835,7 @@ Only AFTER completing all configuration, tell the user:
 > - `안녕하세요` - AI 도우미 테스트
 > - 가면을 써달라고 하면 전문가 모드로 답변합니다
 > - `/weave help` - Weave 워크플로우 도움말
-> - `/weave design docs/` - Phase 기반 개발 시작"
+> - `/weave prepare docs/` - Phase 기반 개발 시작"
 
 ### Important Notes for LLM Agents
 
@@ -849,31 +849,34 @@ Only AFTER completing all configuration, tell the user:
 
 ## Weave Workflow (v0.8+)
 
-After installation, try the **Weave v0.8 workflow** with research-first planning and approval gates:
+After installation, try the **Weave v0.8+ workflow** with unified commands:
 
 ```bash
-# 1. Deep-read docs and create research artifact
-/weave research docs/
-
-# 2. Generate research + spec + plan
+# 1. Generate research + spec + plan in one step
 /weave prepare docs/
 
-# 3. (Optional) Apply annotation notes to refine plan
+# 2. (Optional) Apply annotation notes to refine plan
 /weave refine-plan
 
-# 4. (Required) Approve plan before implementation
-/weave approve-plan
+# 3. (Required) Approve plan before implementation
+/weave approve
 
-# 5. Execute phase with auto-verification
-/weave craft P1
+# 4. Prepare phase execution context
+/weave craft
+
+# 5. (Optional) Run autonomous build loop
+/weave build action=run
 
 # 6. Check progress anytime
 /weave status
 ```
 
-**New in v0.8:**
-- 📝 **Research-first**: Deep document analysis before planning
-- 🔒 **Approval gate**: Plan must be approved before implementation
+**Command Unification (v0.8.16+):**
+- 📝 **prepare**: Absorbs `research` + `spec` + `design` into one command
+- 🔒 **approve**: Replaces `approve-plan`
+- 🔨 **build**: Unified loop command (`action=run/status/stop/list/resume/sync`)
+- 🤖 **agents**: Replaces `sync-agents` and `init-config`
+- 🩹 **troubleshoot**: Absorbs `record` via `--record` flag
 - ✏️ **Annotation cycle**: `tasks/plan-notes.md` directives for plan refinement
 - 🎭 **Auto mask selection**: AI picks best expert for each task
 - ✅ **Multi-layer verification**: Build → Test → E2E → Visual → A11y

@@ -178,99 +178,36 @@ describe('Weave Flow Command', () => {
     cleanupTempDir(tempDir);
   });
 
-  test('flow with docs runs prepare->approval->craft->verify->finalize in one shot', async () => {
+  test('prepare with docs creates plan ready for approval', async () => {
     const tool = createWeaveTool();
     const output = await tool.execute(
-      { command: 'flow', docsPath: 'docs' },
+      { command: 'prepare', docsPath: 'docs' },
       { worktree: tempDir },
     );
 
-    expect(output).toContain('## ▶ Weave Flow');
-    expect(output).toContain('### 1) Prepare');
-    expect(output).toContain('### Plan Gate');
-    expect(output).toContain('### Plan Approval');
-    expect(output).toContain('## ✅ Plan Approved');
-    expect(output).toContain('### 2) Craft');
-    expect(output).toContain('### 3) Verify');
-    expect(output).toContain('### 4) Finalize');
+    expect(output).toContain('## ✅ Weave Prepare 완료');
     expect(existsSync(join(tempDir, 'tasks', 'research.md'))).toBe(true);
 
     const manager = getPhaseManager(tempDir);
     const plan = await manager.loadPlan();
     expect(plan).not.toBeNull();
-    expect(plan?.planApproved).toBe(true);
+    expect(plan?.planApproved).toBe(false);
     expect(plan?.researchPath).toBe('tasks/research.md');
 
     const p1 = manager.getPhase('P1');
     expect(p1).not.toBeNull();
-    expect(p1?.status).toBe('completed');
     expect(p1?.tasks.length).toBeGreaterThan(0);
-    expect(p1?.tasks.every(task => task.status === 'passed')).toBe(true);
-    expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
   }, 20000);
 
-  test('flow finalization advances todo focus to the next incomplete phase', async () => {
+  test('prepare command writes persistent artifact', async () => {
     const tool = createWeaveTool();
 
-    await tool.execute(
-      { command: 'flow', docsPath: 'docs' },
-      { worktree: tempDir },
-    );
-
-    const todo = readFileSync(join(tempDir, 'tasks', 'todo.md'), 'utf-8');
-    expect(todo).toContain('- Focus phase: `P2`');
-    expect(todo).not.toContain('- Focus phase: `P1`');
-  }, 20000);
-
-  test('flow continues in one-shot mode even when plan gate fails', async () => {
-    const tool = createWeaveTool();
-
-    await tool.execute(
+    const output = await tool.execute(
       { command: 'prepare', docsPath: 'docs' },
       { worktree: tempDir },
     );
 
-    const manager = getPhaseManager(tempDir);
-    const plan = await manager.loadPlan();
-    expect(plan).not.toBeNull();
-
-    if (!plan || plan.phases.length === 0) {
-      throw new Error('plan setup failed');
-    }
-
-    const phase = plan.phases[0];
-    phase.doneWhen = '';
-    phase.tasks = [
-      {
-        id: `${phase.id}-T1`,
-        name: `${phase.name} 구현`,
-        status: 'pending',
-        retryCount: 0,
-        maxRetries: 1,
-      },
-    ];
-    await manager.savePlan(plan);
-
-    const output = await tool.execute(
-      { command: 'flow' },
-      { worktree: tempDir },
-    );
-
-    expect(output).toContain('⚠️ Plan gate failed, but flow continues in one-shot mode.');
-    expect(output).toContain('### 2) Craft');
-    expect(output).toContain('### 3) Verify');
-    expect(output).toContain('### 4) Finalize');
-  }, 20000);
-
-  test('research command writes persistent artifact', async () => {
-    const tool = createWeaveTool();
-
-    const output = await tool.execute(
-      { command: 'research', docsPath: 'docs' },
-      { worktree: tempDir },
-    );
-
-    expect(output).toContain('## ✅ Weave Research 완료');
+    expect(output).toContain('## ✅ Weave Prepare 완료');
     expect(output).toContain('Artifact: `tasks/research.md`');
     expect(existsSync(join(tempDir, 'tasks', 'research.md'))).toBe(true);
 
@@ -532,7 +469,7 @@ describe('Weave Flow Command', () => {
     const tool = createWeaveTool();
 
     await tool.execute(
-      { command: 'flow', docsPath: 'docs' },
+      { command: 'prepare', docsPath: 'docs' },
       { worktree: tempDir },
     );
 
@@ -566,11 +503,11 @@ describe('Weave Flow Command', () => {
     expect(p1?.tasks.some(t => t.name.includes('로그인 API 구현'))).toBe(true);
   }, 20000);
 
-  test('approve-plan auto-applies notes and requires re-run for final approval', async () => {
+  test('approve auto-applies notes and requires re-run for final approval', async () => {
     const tool = createWeaveTool();
 
     await tool.execute(
-      { command: 'flow', docsPath: 'docs' },
+      { command: 'prepare', docsPath: 'docs' },
       { worktree: tempDir },
     );
 
@@ -583,7 +520,7 @@ describe('Weave Flow Command', () => {
     );
 
     const firstApprove = await tool.execute(
-      { command: 'approve-plan' },
+      { command: 'approve' },
       { worktree: tempDir },
     );
 
@@ -596,7 +533,7 @@ describe('Weave Flow Command', () => {
     expect(midPlan?.planApproved).toBe(false);
 
     const secondApprove = await tool.execute(
-      { command: 'approve-plan' },
+      { command: 'approve' },
       { worktree: tempDir },
     );
 
@@ -605,56 +542,6 @@ describe('Weave Flow Command', () => {
     const finalPlan = await manager.loadPlan();
     expect(finalPlan).not.toBeNull();
     expect(finalPlan?.planApproved).toBe(true);
-  }, 20000);
-
-  test('flow without docs reuses active plan and prepares execution context', async () => {
-    const tool = createWeaveTool();
-
-    await tool.execute(
-      { command: 'flow', docsPath: 'docs' },
-      { worktree: tempDir },
-    );
-
-    await tool.execute(
-      { command: 'approve-plan' },
-      { worktree: tempDir },
-    );
-
-    await tool.execute(
-      { command: 'flow' },
-      { worktree: tempDir },
-    );
-
-    const output = await tool.execute(
-      { command: 'flow' },
-      { worktree: tempDir },
-    );
-
-    expect(output).toContain('Skipped (existing active plan reused).');
-    expect(output).toContain('### Plan Gate');
-    expect(output).toContain('### Next Steps');
-
-    const manager = getPhaseManager(tempDir);
-    await manager.loadPlan();
-    const p1 = manager.getPhase('P1');
-    expect(p1).not.toBeNull();
-    expect(p1?.tasks[0]?.status).toBe('passed');
-    expect(p1?.tasks[1]?.status).toBe('passed');
-    expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
-  }, 20000);
-
-  test('flow stops before finalize when GDC gate fails', async () => {
-    seedMockGdcConfig(tempDir, 'error');
-
-    const tool = createWeaveTool();
-    const output = await tool.execute(
-      { command: 'flow', docsPath: 'docs' },
-      { worktree: tempDir },
-    );
-
-    expect(output).toContain('### 3) Verify');
-    expect(output).toContain('❌ Verification failed at: GDC Check');
-    expect(output).not.toContain('### 4) Finalize');
   }, 20000);
 
   test('craft is blocked until plan approval', async () => {
@@ -671,19 +558,19 @@ describe('Weave Flow Command', () => {
     );
 
     expect(output).toContain('Plan approval required before implementation.');
-    expect(output).toContain('weave command=approve-plan');
+    expect(output).toContain('weave command=approve');
   }, 20000);
 
   test('craft prepares execution context after approval', async () => {
     const tool = createWeaveTool();
 
     await tool.execute(
-      { command: 'flow', docsPath: 'docs' },
+      { command: 'prepare', docsPath: 'docs' },
       { worktree: tempDir },
     );
 
     await tool.execute(
-      { command: 'approve-plan' },
+      { command: 'approve' },
       { worktree: tempDir },
     );
 
@@ -703,7 +590,7 @@ describe('Weave Flow Command', () => {
     expect(existsSync(join(tempDir, 'tasks', 'todo.md'))).toBe(true);
   }, 30000);
 
-  test('approve-plan with phaseId finalizes the crafted phase', async () => {
+  test('approve with phaseId finalizes the crafted phase', async () => {
     const tool = createWeaveTool();
 
     await tool.execute(
@@ -711,7 +598,7 @@ describe('Weave Flow Command', () => {
       { worktree: tempDir },
     );
     await tool.execute(
-      { command: 'approve-plan' },
+      { command: 'approve' },
       { worktree: tempDir },
     );
     await tool.execute(
@@ -720,7 +607,7 @@ describe('Weave Flow Command', () => {
     );
 
     const output = await tool.execute(
-      { command: 'approve-plan', phaseId: 'P1' },
+      { command: 'approve', phaseId: 'P1' },
       { worktree: tempDir },
     );
 
@@ -744,7 +631,7 @@ describe('Weave Flow Command', () => {
       { worktree: tempDir },
     );
     await tool.execute(
-      { command: 'approve-plan' },
+      { command: 'approve' },
       { worktree: tempDir },
     );
 
@@ -780,7 +667,7 @@ describe('Weave Flow Command', () => {
       { worktree: tempDir },
     );
     await tool.execute(
-      { command: 'approve-plan' },
+      { command: 'approve' },
       { worktree: tempDir },
     );
     await tool.execute(

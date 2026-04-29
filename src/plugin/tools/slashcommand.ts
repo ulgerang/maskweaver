@@ -17,6 +17,7 @@ const tool = <T>(input: T): T => input;
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { loadCommandsJson } from './command-registry.js';
 
 // ============================================================================
 // Types
@@ -38,180 +39,33 @@ interface CommandInfo {
 }
 
 // ============================================================================
-// Built-in Commands (Always Available)
+// Built-in Commands from Registry (commands.json)
 // ============================================================================
 
-const BUILTIN_COMMANDS: Record<string, { metadata: CommandMetadata; content: string }> = {
-    'weave-help': {
-        metadata: {
-            name: 'weave-help',
-            description: 'Weave 워크플로우 도움말',
-            usage: '/weave help',
-            examples: ['/weave help', '/weave'],
-        },
-        content: `# /weave help - Weave 워크플로우 도움말
+function getBuiltinCommandsFromRegistry(): Record<string, { metadata: CommandMetadata; content: string }> {
+    const registry = loadCommandsJson();
+    const builtins: Record<string, { metadata: CommandMetadata; content: string }> = {};
 
-## Weave란?
+    for (const cmd of registry.commands) {
+        const name = `weave-${cmd.name}`;
+        const examples = cmd.examples.slice(0, 2).map(ex => {
+            const match = ex.match(/weave command=(\S+)/);
+            return match ? `/weave ${match[1]}` : `/weave ${cmd.name}`;
+        });
 
-Maskweaver의 Phase-Driven Development 워크플로우입니다.
-"AI가 검증하고, 유저가 확인한다"
+        builtins[name] = {
+            metadata: {
+                name,
+                description: cmd.description,
+                usage: `/weave ${cmd.name}`,
+                examples: examples.length > 0 ? examples : [`/weave ${cmd.name}`],
+            },
+            content: `Use the weave tool with command=${cmd.name}.\n\nExample: weave command=${cmd.name}`,
+        };
+    }
 
----
-
-## 핵심 철학
-
-1. 테스트 먼저 (Protect Before Change)
-2. 작게 자주 (Small & Often)
-3. 동작이 정답 (Working > Perfect)
-
----
-
-## 명령어 목록
-
-| 명령어 | 설명 |
-|--------|------|
-| \`weave init\` | 워크스페이스 초기화 + GDC 연동 점검 |
-| \`weave research [docs]\` | 문서+워크스페이스 깊이 분석 + research 아티팩트 생성 |
-| \`weave prepare [docs]\` | research + spec + plan 생성 (큰 계획은 자동 분할) |
-| \`weave refine-plan\` | plan-notes를 active plan에 자동 반영 |
-| \`weave approve-plan\` | 구현 전 계획 승인 게이트 통과 |
-| \`weave design [docs]\` | 요구사항 분석 → Phase 계획 (큰 계획은 자동 분할) |
-| \`weave craft [id]\` | Phase 실행 준비 (실행 컨텍스트 생성) |
-| \`weave flow [docs]\` | prepare -> auto-approve -> craft -> verify -> finalize |
-| \`weave status\` | 진행 상황 확인 |
-| \`weave help\` | 이 도움말 |
-| \`weave sync-agents\` | 설정 파일 기준으로 더미 에이전트 파일 강제 재생성 |
-| \`weave init-config\` | 기본 설정 파일(maskweaver.config.json) 생성 |
- 
-**Note**: weave 도구를 직접 호출할 수도 있습니다: \`weave command=design docsPath=docs/\`
-`,
-    },
-    'weave-init': {
-        metadata: {
-            name: 'weave-init',
-            description: 'Weave 워크플로우 초기화 + GDC 연동 점검',
-            usage: '/weave init',
-            examples: ['/weave init'],
-        },
-        content: `Use the weave tool with command=init.
-
-Example: weave command=init`,
-    },
-    'weave-design': {
-        metadata: {
-            name: 'weave-design',
-            description: '요구사항 분석 및 Phase 계획 수립',
-            usage: '/weave design [docsPath]',
-            examples: ['/weave design docs/', '/weave design wiki/'],
-        },
-        content: `Use the weave tool with command=design and specify docsPath.
-
-Example: weave command=design docsPath="docs/"`,
-    },
-    'weave-research': {
-        metadata: {
-            name: 'weave-research',
-            description: '문서+워크스페이스를 깊게 조사하고 research 아티팩트 생성',
-            usage: '/weave research [docsPath]',
-            examples: ['/weave research docs/', '/weave research wiki/spec.md'],
-        },
-        content: `Use the weave tool with command=research and specify docsPath.
-This command investigates both docs and current workspace context.
-
-Example: weave command=research docsPath="docs/"`,
-    },
-    'weave-prepare': {
-        metadata: {
-            name: 'weave-prepare',
-            description: 'research + spec + plan 생성',
-            usage: '/weave prepare [docsPath]',
-            examples: ['/weave prepare docs/'],
-        },
-        content: `Use the weave tool with command=prepare and specify docsPath.
-
-Example: weave command=prepare docsPath="docs/"`,
-    },
-    'weave-refine-plan': {
-        metadata: {
-            name: 'weave-refine-plan',
-            description: 'plan-notes를 active plan에 자동 반영',
-            usage: '/weave refine-plan',
-            examples: ['/weave refine-plan'],
-        },
-        content: `Use the weave tool with command=refine-plan.
-
-Example: weave command=refine-plan`,
-    },
-    'weave-approve-plan': {
-        metadata: {
-            name: 'weave-approve-plan',
-            description: '구현 전 계획 승인 게이트 통과',
-            usage: '/weave approve-plan',
-            examples: ['/weave approve-plan'],
-        },
-        content: `Use the weave tool with command=approve-plan.
-
-Example: weave command=approve-plan`,
-    },
-    'weave-craft': {
-        metadata: {
-            name: 'weave-craft',
-            description: 'Phase 실행 준비 (실행 컨텍스트 생성)',
-            usage: '/weave craft [phaseId]',
-            examples: ['/weave craft P1', '/weave craft P2'],
-        },
-        content: `Use the weave tool with command=craft and specify phaseId.
-
-Example: weave command=craft phaseId="P1"`,
-    },
-    'weave-flow': {
-        metadata: {
-            name: 'weave-flow',
-            description: '원커맨드 실행 (prepare -> auto-approve -> craft -> verify -> finalize)',
-            usage: '/weave flow [docsPath]',
-            examples: ['/weave flow docs/', '/weave flow'],
-        },
-        content: `Use the weave tool with command=flow.
-
-With docs path:
-weave command=flow docsPath="docs/"
-
-Continue active plan:
-weave command=flow
-
-Note: If plan is not approved yet, flow pauses and asks for:
-weave command=approve-plan`,
-    },
-    'weave-status': {
-        metadata: {
-            name: 'weave-status',
-            description: '진행 상황 확인',
-            usage: '/weave status',
-            examples: ['/weave status'],
-        },
-        content: `Use the weave tool with command=status.
-
-Example: weave command=status`,
-    },
-    'weave-repair': {
-        metadata: {
-            name: 'weave-repair',
-            description: 'Scan and auto-repair corrupted plan YAML files',
-            usage: '/weave repair',
-            examples: ['/weave repair'],
-        },
-        content: `Use the weave tool with command=repair to scan and auto-repair all plan YAML files.
-
-This command will:
-1. Scan all plan files in .opencode/weave/plans/
-2. Detect YAML corruption (unclosed quotes, tab characters, etc.)
-3. Auto-repair when possible (backup the corrupted file as .corrupted)
-4. Restore from .bak backup if auto-repair fails
-5. Report unrecoverable files that need manual intervention
-
-Example: weave command=repair`,
-    },
-};
+    return builtins;
+}
 
 // ============================================================================
 // Command Discovery
@@ -272,7 +126,9 @@ function discoverCommandsFromDir(commandsDir: string, scope: 'package' | 'projec
     return commands;
 }
 
-function getAllCommands(assetsDirs: string[], projectDir: string): CommandInfo[] {
+function getAllCommands(assetsDir: string | undefined, projectDir: string): CommandInfo[] {
+    const BUILTIN_COMMANDS = getBuiltinCommandsFromRegistry();
+
     // Start with builtin commands
     const commands: CommandInfo[] = Object.entries(BUILTIN_COMMANDS).map(([name, cmd]) => ({
         name,
@@ -282,7 +138,7 @@ function getAllCommands(assetsDirs: string[], projectDir: string): CommandInfo[]
     }));
 
     // Load from package assets
-    for (const assetsDir of assetsDirs) {
+    if (assetsDir) {
         const packageCommands = discoverCommandsFromDir(
             path.join(assetsDir, 'commands'),
             'package'
@@ -319,24 +175,26 @@ function getAllCommands(assetsDirs: string[], projectDir: string): CommandInfo[]
 // Tool Factory
 // ============================================================================
 
-export function createSlashcommandTool() {
-    return {
-        description: `Execute a slash command. Available commands include:
-- /weave help - Weave workflow help
-- /weave init - Initialize workspace and probe GDC integration
-- /weave research [docs] - Deep-read docs + workspace and write research artifact
-- /weave design [docs] - Analyze requirements and create plan
-- /weave prepare [docs] - Create research + spec + plan
-- /weave refine-plan - Apply plan-note directives to active plan
-- /weave approve-plan - Approve plan before implementation
-- /weave flow [docs] - One-command path (prepare -> auto-approve -> craft -> verify -> finalize)
-- /weave craft [phaseId] - Prepare phase execution context
-- /weave status - View progress
-- /weave repair - Scan and auto-repair corrupted plan YAML files
-- /weave sync-agents - Force regenerate dummy agent files from config pool
-- /weave init-config - Create default config files with pool template
+export function createSlashcommandTool(assetsDir?: string) {
+    const registry = loadCommandsJson();
+    const descLines = ['Execute a slash command. Available commands include:'];
+    for (const cmd of registry.commands) {
+        descLines.push(`- /weave ${cmd.name} - ${cmd.description}`);
+    }
+    descLines.push('');
+    descLines.push('Use command="list" to see all available commands.');
 
-Use command="list" to see all available commands.`,
+    // Build dynamic shorthand list from registry
+    const shorthandSet = new Set<string>();
+    for (const cmd of registry.commands) {
+        shorthandSet.add(cmd.name);
+        for (const alias of cmd.aliases) shorthandSet.add(alias);
+        for (const alias of cmd.deprecatedAliases) shorthandSet.add(alias);
+    }
+    const shorthandList = Array.from(shorthandSet);
+
+    return {
+        description: descLines.join('\n'),
 
         args: {
             command: z.string()
@@ -350,7 +208,7 @@ Use command="list" to see all available commands.`,
             const projectDir = context.worktree;
 
             // Discover all commands (builtin + package + project)
-            const commands = getAllCommands([], projectDir);
+            const commands = getAllCommands(assetsDir, projectDir);
 
             // Handle "list" command
             if (args.command === 'list' || !args.command) {
@@ -378,7 +236,7 @@ Use command="list" to see all available commands.`,
                 if (helpCmd) {
                     return helpCmd.content || 'Weave help content not available.';
                 }
-            } else if (['init', 'status', 'design', 'prepare', 'refine-plan', 'flow', 'craft', 'research', 'approve-plan', 'help', 'repair', 'sync-agents', 'init-config'].includes(cmdName)) {
+            } else if (shorthandList.includes(cmdName)) {
                 // Shorthand: "status" -> "weave-status"
                 const weaveCmd = commands.find(c => c.name === `weave-${cmdName}`);
                 if (weaveCmd) {

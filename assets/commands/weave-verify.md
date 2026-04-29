@@ -1,44 +1,23 @@
 ---
-description: 프로젝트 유형 자동 감지 기반 검증 실행 (build/test)
+description: Run build and test verification for the current worktree
 ---
 
-# /weave-verify - 검증 실행
+# /weave-verify
 
-## 개요
+Run project-appropriate build and test checks in the current worktree.
 
-현재 worktree(프로젝트 루트)에서 **빌드/테스트 검증**을 실행합니다.
-
-Weave는 특정 생태계(npm)만 가정하지 않고, 프로젝트 루트의 증거를 기반으로 검증 커맨드를 추천/실행합니다.
-
-- Node: `package.json scripts` 기반(`npm|pnpm|yarn|bun` 자동 감지)
-- Go: `go build ./...`, `go test ./...`
-- Rust: `cargo check`, `cargo test`
-- Python: `pytest` 또는 `python -m unittest` (+ optional ruff/mypy)
-- .NET: `dotnet build`, `dotnet test`
-
----
-
-## 실행
+Use the `weave` tool:
 
 ```txt
 weave command=verify
-```
-
-프로젝트 타입 힌트를 주고 싶으면:
-
-```txt
+weave command=verify verifyMode=quick
 weave command=verify projectType="go"
 ```
 
-빠르게(typecheck+tests만) 돌리려면:
+## Behavior
 
-```txt
-weave command=verify verifyMode="quick"
-```
+- Detects common project types from files in the project root.
+- Recommends or runs build/test commands for Node, Go, Rust, Python, .NET, and similar stacks.
+- Reports command output and failure tails so the next action is clear.
 
----
-
-## 결과
-
-- PASS면 `✅ Verification passed.`
-- FAIL이면 실패한 레이어와 로그(tail)를 출력합니다
+Verification evidence matters more than workflow metadata. Treat failing builds/tests as blockers unless the failure is clearly unrelated and already known.

@@ -1,62 +1,22 @@
 ---
-description: 에이전트 파일 동기화 및 설정 초기화
+description: Sync generated agent files and initialize runtime configuration
 ---
 
-# /weave-agents - 에이전트 및 설정 관리
+# /weave-agents
 
-## 개요
+Manage the agent files that Maskweaver exposes to opencode.
 
-에이전트 파일과 설정 파일을 관리합니다. 기존 `sync-agents`와 `init-config`를 통합한 명령어입니다.
+Use the `weave` tool:
 
-| 플래그 | 설명 | 대응 기존 명령어 |
-|--------|------|-----------------|
-| `sync` | 설정 기준으로 더미 에이전트 파일 강제 재생성 | `weave sync-agents` |
-| `init` | 기본 설정 파일(maskweaver.config.json) 생성 | `weave init-config` |
-
----
-
-## 사용법
-
-```bash
-# 에이전트 파일 동기화
-/weave-agents --sync
-
-# 기본 설정 파일 생성
-/weave-agents --init
-
-# 동시 실행
-/weave-agents --sync --init
+```txt
+weave command=agents sync=true
+weave command=agents init=true
 ```
 
----
+## Modes
 
-## 입력
+- `sync=true`: regenerate `.opencode/agents/*.md` from the configured dummy-human pool.
+- `init=true`: create the default runtime and plugin configuration files when they do not exist.
+- `sync=true init=true`: initialize config and refresh generated agent files in one pass.
 
-```yaml
-sync: true   # (선택) 에이전트 파일 강제 재생성
-init: true   # (선택) 기본 설정 파일 생성 (기존 파일 덮어쓰지 않음)
-```
-
----
-
-## 출력 예시
-
-### 동기화
-
-```markdown
-## 🔄 Agent Sync
-
-✅ Updated: `.opencode/agents/dummy-human-1.md`
-✅ Updated: `.opencode/agents/dummy-human-2.md`
-
-> ⚠️ **Important:** You may need to restart OpenCode for the updated agent files to take effect.
-```
-
-### 설정 초기화
-
-```markdown
-## 📝 Config Initialization
-
-✅ Created runtime config: maskweaver.config.json
-✅ Created plugin config: .opencode/maskweaver.json
-```
+Prefer this command when agent markdown files are missing, stale, or out of sync with `maskweaver.config.json`.

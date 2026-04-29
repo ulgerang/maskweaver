@@ -1,43 +1,22 @@
 ---
-description: Phase 실행 준비 (실행 컨텍스트 생성)
+description: Prepare execution context for a phase
 ---
 
-# /weave-craft - Phase 실행 준비
+# /weave-craft
 
-## 개요
+Prepare one approved phase for implementation.
 
-`/weave-craft`는 활성 플랜의 Phase를 실행 가능한 상태로 준비합니다.
-
-- 대상 phase 자동 선택(또는 직접 지정)
-- phase 상태/실행 계획 로드
-- 구현에 필요한 다음 액션 안내
-
-> 이 명령은 과거 자동 루프를 돌리지 않습니다.
-
-## 사용법
+Use the `weave` tool:
 
 ```txt
-/weave-craft $ARGUMENTS
+weave command=craft
+weave command=craft phaseId="P1"
 ```
 
-- `$ARGUMENTS` = 선택적 Phase ID (`P1`, `P2` 등)
+## Behavior
 
-예시:
+- Selects the next runnable phase when `phaseId` is omitted.
+- Loads plan, spec, masks, and execution context for the chosen phase.
+- Gives the implementer the bounded task context needed to start work.
 
-```txt
-/weave-craft
-/weave-craft P1
-```
-
-## 내부 호출
-
-```txt
-weave command=craft phaseId="$ARGUMENTS"
-```
-
-## 권장 흐름
-
-1. `weave command=craft`로 phase 실행 컨텍스트 준비
-2. 코드 구현/위임 수행
-3. `weave command=verify`로 검증
-4. `weave command=approve-plan`으로 phase 확정
+After implementation, run `/weave-verify` or `/build` before using `/weave-approve` to finalize the phase.

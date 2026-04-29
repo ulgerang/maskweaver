@@ -1,4 +1,4 @@
-# Installation
+﻿# Installation
 
 > Complete guide to installing and verifying Maskweaver — the AI Expert Persona System for [OpenCode](https://github.com/sst/opencode).
 >
@@ -491,7 +491,7 @@ maskweaver -V
 npm list maskweaver
 
 # In OpenCode chat - use the maskweaver_status tool
-# or type /weave help to see version info
+# or type /weave-help to see version info
 ```
 
 ```typescript
@@ -834,8 +834,8 @@ Only AFTER completing all configuration, tell the user:
 > 재시작 후 다음 명령어로 확인할 수 있어요:
 > - `안녕하세요` - AI 도우미 테스트
 > - 가면을 써달라고 하면 전문가 모드로 답변합니다
-> - `/weave help` - Weave 워크플로우 도움말
-> - `/weave prepare docs/` - Phase 기반 개발 시작"
+> - `/weave-help` - Weave 워크플로우 도움말
+> - `/weave-prepare docs/` - Phase 기반 개발 시작"
 
 ### Important Notes for LLM Agents
 
@@ -853,22 +853,22 @@ After installation, try the **Weave v0.8+ workflow** with unified commands:
 
 ```bash
 # 1. Generate research + spec + plan in one step
-/weave prepare docs/
+/weave-prepare docs/
 
 # 2. (Optional) Apply annotation notes to refine plan
-/weave refine-plan
+/weave-refine-plan
 
 # 3. (Required) Approve plan before implementation
-/weave approve
+/weave-approve
 
 # 4. Prepare phase execution context
-/weave craft
+/weave-craft
 
 # 5. (Optional) Run autonomous build loop
-/weave build action=run
+/build action=run
 
 # 6. Check progress anytime
-/weave status
+/weave-status
 ```
 
 **Command Unification (v0.8.16+):**

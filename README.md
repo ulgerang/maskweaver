@@ -1,4 +1,4 @@
-# 🎭 Maskweaver: Expert Persona Framework for OpenCode
+﻿# 🎭 Maskweaver: Expert Persona Framework for OpenCode
 
 <div align="center">
 
@@ -145,7 +145,7 @@ npm list maskweaver
 
 # In OpenCode chat
 # Use the maskweaver_status tool or type:
-/weave help
+/weave-help
 ```
 
 ```typescript
@@ -219,40 +219,40 @@ Weave is Maskweaver's flagship workflow. It breaks work into testable phases, au
 
 | Command | Description |
 |---------|-------------|
-| `/weave init` | Initialize Weave (once per repo) |
-| `/weave prepare [docs]` | Generate research + spec + plan in one step (auto-split if oversized) |
-| `/weave refine-plan` | Apply structured plan notes (`tasks/plan-notes.md`) to active plan |
-| `/weave approve` | Explicit human approval gate before implementation |
-| `/weave craft [P#]` | Prepare phase execution context and guidance |
-| `/weave build` | Autonomous build loop (`action=run/status/stop/list/resume/sync`) |
-| `/weave verify` | Run build/test verification (auto-detect) |
-| `/weave worktree ...` | Manage git worktrees for parallel work |
-| `/weave status` | View project progress and stats |
-| `/weave agents` | Sync agent files or init config (`sync=true` / `init=true`) |
-| `/weave troubleshoot` | Search global knowledge (`record=true` to save a solution) |
-| `/weave archive` | Archive the verified active change |
-| `/weave help` | Show documentation |
+| `/weave-init` | Initialize Weave (once per repo) |
+| `/weave-prepare [docs]` | Generate research + spec + plan in one step (auto-split if oversized) |
+| `/weave-refine-plan` | Apply structured plan notes (`tasks/plan-notes.md`) to active plan |
+| `/weave-approve` | Explicit human approval gate before implementation |
+| `/weave-craft [P#]` | Prepare phase execution context and guidance |
+| `/build` | Autonomous build loop (`action=run/status/stop/list/resume/sync`) |
+| `/weave-verify` | Run build/test verification (auto-detect) |
+| `/weave-worktree ...` | Manage git worktrees for parallel work |
+| `/weave-status` | View project progress and stats |
+| `/weave-agents` | Sync agent files or init config (`sync=true` / `init=true`) |
+| `/weave-troubleshoot` | Search global knowledge (`record=true` to save a solution) |
+| `/weave-archive` | Archive the verified active change |
+| `/weave-help` | Show documentation |
 
-> Tip: In OpenCode chat you can use `/weave ...` commands, and they map to the underlying `weave command=...` tool calls.
+> Tip: In OpenCode chat, use the visible slash commands such as `/weave-prepare` and `/build`; they map to the underlying `weave command=...` tool calls.
 
 #### Workflow
 
 ```
-0. INIT (once): /weave init
+0. INIT (once): /weave-init
        ↓
-1. PLAN: /weave prepare docs/
+1. PLAN: /weave-prepare docs/
     - Generates research + spec + phase plan (auto-splits if oversized)
        ↓
-2. REFINE (optional): /weave refine-plan
+2. REFINE (optional): /weave-refine-plan
     - apply annotation notes from tasks/plan-notes.md
        ↓
-3. APPROVAL GATE: /weave approve
+3. APPROVAL GATE: /weave-approve
     - required before craft execution
        ↓
-4. CRAFT: /weave craft
+4. CRAFT: /weave-craft
      - Generates an execution plan and next actions
      - Implement/verify changes, then finalize with approve
-     - Use `/weave verify` anytime for build/test checks
+     - Use `/weave-verify` anytime for build/test checks
        ↓
 5. HANDOFF: You validate UX/intent and move to next phase
 ```
@@ -439,7 +439,7 @@ import { WeaveOrchestrator, GlobalKnowledge } from 'maskweaver/weave';
 ### Step 0: Initialize (Once)
 
 ```bash
-/weave init
+/weave-init
 ```
 
 ### Step 1: Create a Plan
@@ -447,13 +447,13 @@ import { WeaveOrchestrator, GlobalKnowledge } from 'maskweaver/weave';
 Generate research + spec + plan in one command:
 
 ```bash
-/weave prepare docs/
+/weave-prepare docs/
 ```
 
 Then approve the plan:
 
 ```bash
-/weave approve
+/weave-approve
 ```
 
 The AI will:
@@ -482,7 +482,7 @@ Is this plan okay? Let me know if changes are needed.
 ### Step 2: Approve the Plan (Required)
 
 ```bash
-/weave approve
+/weave-approve
 ```
 
 ### Step 3: Craft a Phase (Auto-select if omitted)
@@ -490,10 +490,10 @@ Is this plan okay? Let me know if changes are needed.
 Start with the first phase:
 
 ```bash
-/weave craft
+/weave-craft
 ```
 
-`/weave craft` returns execution context for the phase. Implement changes, then rerun `/weave craft` if you want to refresh the plan view.
+`/weave-craft` returns execution context for the phase. Implement changes, then rerun `/weave-craft` if you want to refresh the plan view.
 
 ### Step 4: Continue Implementation
 
@@ -547,7 +547,7 @@ http://localhost:5173
 ### Step 6: Check Status Anytime
 
 ```bash
-/weave status
+/weave-status
 ```
 
 Output:

@@ -9,4 +9,9 @@
 
 import { MaskweaverPlugin } from "./plugin/index.js";
 
-export default MaskweaverPlugin;
+export { MaskweaverPlugin };
+
+export default {
+  id: "maskweaver",
+  server: MaskweaverPlugin,
+};

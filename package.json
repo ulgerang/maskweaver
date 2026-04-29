@@ -1,6 +1,6 @@
 {
   "name": "maskweaver",
-  "version": "0.9.1",
+  "version": "0.9.6",
   "description": "AI Expert Persona System - Give your AI coding assistant expert personalities (가면술사)",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,6 +25,11 @@
       "require": "./dist/cli/install.js"
     },
     "./plugin": {
+      "types": "./dist/plugin/index.d.ts",
+      "import": "./dist/plugin/index.js",
+      "require": "./dist/plugin/index.js"
+    },
+    "./server": {
       "types": "./dist/plugin/index.d.ts",
       "import": "./dist/plugin/index.js",
       "require": "./dist/plugin/index.js"
@@ -72,12 +77,13 @@
   },
   "scripts": {
     "build": "tsc",
-    "clean": "rm -rf dist",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "tsc --watch",
     "test": "vitest run",
     "lint": "tsc --noEmit",
     "postinstall": "node postinstall.mjs",
-    "prepublishOnly": "npm run build"
+    "prepack": "npm run clean && npm run build",
+    "prepublishOnly": "npm run clean && npm run build"
   },
   "keywords": [
     "opencode",

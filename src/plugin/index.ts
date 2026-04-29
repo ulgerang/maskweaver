@@ -61,11 +61,24 @@ interface InstallResult {
   errors: string[];
 }
 
+const BUILD_COMMAND_TEMPLATE = `Use the \`weave\` tool with \`command="build"\`.
+
+Forward the user arguments from \`$ARGUMENTS\` to the build command:
+
+- No arguments: run the default build loop.
+- \`status <buildId>\`: call \`weave\` with \`command="build"\`, \`action="status"\`, and \`buildId\`.
+- \`stop <buildId>\`: call \`weave\` with \`command="build"\`, \`action="stop"\`, and \`buildId\`.
+- \`list\`: call \`weave\` with \`command="build"\` and \`action="list"\`.
+- \`resume <buildId>\`: call \`weave\` with \`command="build"\`, \`action="resume"\`, and \`buildId\`.
+- \`sync <buildId>\`: call \`weave\` with \`command="build"\`, \`action="sync"\`, and \`buildId\`.
+- Otherwise, treat \`$ARGUMENTS\` as phase IDs or build options for \`action="run"\`.
+
+Do not run shell build commands directly unless the \`weave\` tool asks for verification.`;
+
 const REMOVED_WEAVE_COMMAND_FILES = [
   'weave-task.md',
   'weave-task-auto.md',
   'wave-task-auto.md',
-  'weave-approve.md',
 ];
 
 function getAssetsDir(): string {
@@ -1208,7 +1221,14 @@ ${buildRichPrompt(state.activeMask)}
 
     // Config hook - allows plugins to modify opencode configuration
     config: async (config: any) => {
-      // Reserved for future configuration injection (model, provider, etc.)
+      // opencode discovers slash commands from config.command and command files.
+      // installAssets() writes command files for subsequent starts, while this
+      // hook makes the direct /build command visible on the current plugin load.
+      config.command ||= {};
+      config.command.build ||= {
+        description: 'Run or manage the Maskweaver autonomous build loop',
+        template: BUILD_COMMAND_TEMPLATE,
+      };
       return;
     },
   };

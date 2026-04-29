@@ -1,4 +1,4 @@
-# 설치 가이드
+﻿# 설치 가이드
 
 > Maskweaver — AI 전문가 페르소나 시스템을 [OpenCode](https://github.com/sst/opencode)에 설치하고 확인하는 완전한 가이드입니다.
 >
@@ -467,7 +467,7 @@ npm list maskweaver
 
 # OpenCode 채팅 내에서
 # maskweaver_status 도구를 사용하거나
-# /weave help 를 입력하면 버전 정보가 표시됩니다
+# /weave-help 를 입력하면 버전 정보가 표시됩니다
 ```
 
 ```typescript
@@ -811,8 +811,8 @@ EOF
 > 재시작 후 다음과 같이 사용할 수 있어요:
 > - 일반 대화: 평소처럼 질문하세요
 > - 전문가 모드: '리누스 토발즈처럼 코드 리뷰해줘'라고 요청하세요
-> - `/weave help` - Weave 워크플로우 도움말
-> - `/weave prepare docs/` - Phase 기반 개발 시작"
+> - `/weave-help` - Weave 워크플로우 도움말
+> - `/weave-prepare docs/` - Phase 기반 개발 시작"
 
 ### LLM 에이전트 주의사항
 
@@ -833,22 +833,22 @@ EOF
 
 `ash
 # 1. research + spec + 계획을 한 번에 생성
-/weave prepare docs/
+/weave-prepare docs/
 
 # 2. (선택) 노트로 계획 정제
-/weave refine-plan
+/weave-refine-plan
 
 # 3. (필수) 구현 전 계획 승인
-/weave approve
+/weave-approve
 
 # 4. Phase 실행 컨텍스트 준비
-/weave craft
+/weave-craft
 
 # 5. (선택) 자율 빌드 루프 실행
-/weave build action=run
+/build action=run
 
 # 6. 언제든 진행 상황 확인
-/weave status
+/weave-status
 `
 
 **명령어 통합 (v0.8.16+):**

@@ -1,6 +1,6 @@
 {
   "name": "maskweaver",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "description": "AI Expert Persona System - Give your AI coding assistant expert personalities (가면술사)",
   "type": "module",
   "main": "./dist/index.js",

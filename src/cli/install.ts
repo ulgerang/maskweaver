@@ -22,8 +22,10 @@ import { writeDefaultRuntimeConfig, writeDefaultPluginConfig } from "../shared/g
 // ============================================================================
 
 const PLUGIN_NAME = "maskweaver";
+const PLUGIN_LATEST = "maskweaver@latest";
 const LEGACY_PLUGIN_NAMES = ["maskweaver/plugin", "@maskweaver/plugin"] as const;
-const ALL_PLUGIN_NAMES = [PLUGIN_NAME, ...LEGACY_PLUGIN_NAMES] as const;
+const ALL_PLUGIN_NAMES = [PLUGIN_NAME, PLUGIN_LATEST, ...LEGACY_PLUGIN_NAMES] as const;
+const ALL_BARE_OR_VERSIONED = [PLUGIN_NAME, PLUGIN_LATEST];
 const CONFIG_NAME = "opencode.json";
 
 // ANSI Colors
@@ -115,7 +117,10 @@ function getInstalledPluginEntries(config: any): string[] {
 }
 
 function isPluginInstalled(config: any): boolean {
-  return getInstalledPluginEntries(config).length > 0;
+  if (!config.plugin || !Array.isArray(config.plugin)) return false;
+  return config.plugin.some(
+    (p: string) => ALL_BARE_OR_VERSIONED.some(name => p === name || p.startsWith(`${name}@`))
+  );
 }
 
 function normalizePluginEntries(config: any): { migratedFrom: string[]; changed: boolean } {
@@ -123,20 +128,37 @@ function normalizePluginEntries(config: any): { migratedFrom: string[]; changed:
     return { migratedFrom: [], changed: false };
   }
 
+  // Find legacy entries
   const migratedFrom = config.plugin.filter((plugin: string) =>
     LEGACY_PLUGIN_NAMES.includes(plugin as (typeof LEGACY_PLUGIN_NAMES)[number])
   );
 
-  if (migratedFrom.length === 0) {
+  // Find bare "maskweaver" entries that should become "@latest"
+  const hasBare = config.plugin.some((p: string) => p === PLUGIN_NAME);
+  const hasVersioned = config.plugin.some((p: string) => p.startsWith(`${PLUGIN_NAME}@`));
+
+  if (migratedFrom.length === 0 && !hasBare && !hasVersioned) {
+    // Check if already has versioned entry
+    if (config.plugin.some((p: string) => p === PLUGIN_LATEST)) {
+      return { migratedFrom: [], changed: false };
+    }
     return { migratedFrom: [], changed: false };
   }
 
   const preserved = config.plugin.filter(
-    (plugin: string) => !ALL_PLUGIN_NAMES.includes(plugin as (typeof ALL_PLUGIN_NAMES)[number])
+    (plugin: string) =>
+      !ALL_PLUGIN_NAMES.includes(plugin as (typeof ALL_PLUGIN_NAMES)[number]) &&
+      !plugin.startsWith(`${PLUGIN_NAME}@`)
   );
 
-  config.plugin = [...preserved, PLUGIN_NAME];
-  return { migratedFrom, changed: true };
+  // If has versioned entry, keep it; otherwise write @latest
+  const existingVersioned = config.plugin.find((p: string) => p.startsWith(`${PLUGIN_NAME}@`));
+  config.plugin = [...preserved, existingVersioned || PLUGIN_LATEST];
+
+  if (migratedFrom.length > 0 || hasBare) {
+    return { migratedFrom: [...migratedFrom, hasBare ? PLUGIN_NAME : ""].filter(Boolean), changed: true };
+  }
+  return { migratedFrom: [], changed: false };
 }
 
 // ============================================================================
@@ -174,16 +196,19 @@ async function installPlugin(options: { local?: boolean; tui?: boolean }) {
       return;
     }
 
-    // Check if already installed
-    if (config.plugin.includes(PLUGIN_NAME)) {
+    // Check if already installed (any form: bare, @latest, or @version)
+    const alreadyInstalled = config.plugin.some(
+      (p: string) => p === PLUGIN_NAME || p.startsWith(`${PLUGIN_NAME}@`)
+    );
+    if (alreadyInstalled) {
       warning(`플러그인이 이미 설치되어 있습니다.`);
-      info(`현재 ${scope} 설정에 등록되어 있습니다: ${PLUGIN_NAME}`);
+      info(`현재 ${scope} 설정에 등록되어 있습니다: ${PLUGIN_LATEST}`);
       log("");
       return;
     }
 
-    // Add plugin
-    config.plugin.push(PLUGIN_NAME);
+    // Add plugin with @latest tag
+    config.plugin.push(PLUGIN_LATEST);
 
     // Save config
     writeConfig(configPath, config);
@@ -214,7 +239,7 @@ async function installPlugin(options: { local?: boolean; tui?: boolean }) {
 
     success(`플러그인이 성공적으로 설치되었습니다!`);
     log("");
-    log(`📦 설치된 플러그인: ${PLUGIN_NAME}`, "bright");
+    log(`📦 설치된 플러그인: ${PLUGIN_LATEST}`, "bright");
     log(`📍 위치: ${configPath}`, "dim");
     log("");
     log(`다음 단계:`, "bright");
@@ -261,9 +286,9 @@ async function uninstallPlugin(options: { local?: boolean; tui?: boolean }) {
       return;
     }
 
-    // Remove plugin
+    // Remove plugin (all forms: bare, @latest, @version, legacy)
     config.plugin = config.plugin.filter(
-      (p: string) => !ALL_PLUGIN_NAMES.includes(p as (typeof ALL_PLUGIN_NAMES)[number])
+      (p: string) => !ALL_PLUGIN_NAMES.includes(p as (typeof ALL_PLUGIN_NAMES)[number]) && !p.startsWith(`${PLUGIN_NAME}@`)
     );
 
     // Save config

@@ -20,6 +20,8 @@ import * as os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { VERSION } from '../version.js';
+import { fetchNpmDistTags, type NpmDistTags } from '../cli/config-manager/npm-dist-tags.js';
+import { checkVersionCompatibility } from '../cli/config-manager/version-compatibility.js';
 import {
   loadPluginConfig,
   isMaskEnabled,
@@ -845,14 +847,20 @@ interface PluginState {
 let state: PluginState | null = null;
 
 // ============================================================================
-// Package Cache Version Check
+// Package Cache Version Check (oh-my-openagent style)
 // ============================================================================
 
 const OPENCODE_PACKAGES_DIR = path.join(os.homedir(), '.cache', 'opencode', 'packages');
-const MASKWEAVER_PACKAGE_GLOB = 'maskweaver@*';
 
-function getCacheVersion(): { version: string; pkgDir: string } | null {
-  if (!fs.existsSync(OPENCODE_PACKAGES_DIR)) return null;
+interface CacheVersionInfo {
+  version: string | null
+  pkgDir: string | null
+}
+
+function getCachedPackageVersion(): CacheVersionInfo {
+  if (!fs.existsSync(OPENCODE_PACKAGES_DIR)) {
+    return { version: null, pkgDir: null };
+  }
 
   const entries = fs.readdirSync(OPENCODE_PACKAGES_DIR);
   for (const entry of entries) {
@@ -866,60 +874,110 @@ function getCacheVersion(): { version: string; pkgDir: string } | null {
     } catch { continue; }
   }
 
-  return null;
+  return { version: null, pkgDir: null };
 }
 
-function getLatestNpmVersion(): string | null {
-  try {
-    const result = spawnSync('npm', ['view', 'maskweaver', 'version'], {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 10000,
-      windowsHide: true,
-    });
-    if (result.status === 0 && result.stdout) {
-      return result.stdout.trim();
-    }
-  } catch { }
-  return null;
+async function fetchLatestFromRegistry(): Promise<NpmDistTags | null> {
+  return fetchNpmDistTags('maskweaver');
 }
 
-function checkAndInvalidateCache(): { invalidated: boolean; cachedVersion: string | null; latestVersion: string | null } {
-  const cached = getCacheVersion();
-  if (!cached) {
-    return { invalidated: false, cachedVersion: null, latestVersion: null };
+interface UpdateCheckResult {
+  updateAvailable: boolean
+  installedVersion: string | null
+  latestVersion: string | null
+  isDowngrade: boolean
+  isMajorBump: boolean
+  requiresMigration: boolean
+  message: string | null
+}
+
+async function checkForUpdates(): Promise<UpdateCheckResult> {
+  const cached = getCachedPackageVersion();
+  const installedVersion = cached.version;
+  const latestTags = await fetchLatestFromRegistry();
+  const latestVersion = latestTags?.latest ?? null;
+
+  if (!installedVersion) {
+    return {
+      updateAvailable: false,
+      installedVersion: null,
+      latestVersion,
+      isDowngrade: false,
+      isMajorBump: false,
+      requiresMigration: false,
+      message: null,
+    };
   }
 
-  if (cached.version === VERSION) {
-    return { invalidated: false, cachedVersion: cached.version, latestVersion: null };
+  if (installedVersion === VERSION) {
+    return {
+      updateAvailable: false,
+      installedVersion,
+      latestVersion,
+      isDowngrade: false,
+      isMajorBump: false,
+      requiresMigration: false,
+      message: null,
+    };
   }
 
-  const latest = getLatestNpmVersion();
-
-  if (latest && latest !== cached.version) {
-    try {
-      fs.rmSync(cached.pkgDir, { recursive: true, force: true });
-      return { invalidated: true, cachedVersion: cached.version, latestVersion: latest };
-    } catch {
-      return { invalidated: false, cachedVersion: cached.version, latestVersion: latest };
-    }
+  if (!latestVersion || latestVersion === installedVersion) {
+    return {
+      updateAvailable: false,
+      installedVersion,
+      latestVersion,
+      isDowngrade: false,
+      isMajorBump: false,
+      requiresMigration: false,
+      message: `Plugin cache v${installedVersion} — current is v${VERSION}.`,
+    };
   }
 
-  return { invalidated: false, cachedVersion: cached.version, latestVersion: latest };
+  const compatibility = checkVersionCompatibility(installedVersion, latestVersion);
+  const currentIsLatest = installedVersion === latestVersion;
+
+  if (currentIsLatest) {
+    return {
+      updateAvailable: false,
+      installedVersion,
+      latestVersion,
+      isDowngrade: false,
+      isMajorBump: false,
+      requiresMigration: false,
+      message: `Plugin cache v${installedVersion} — current is v${VERSION}.`,
+    };
+  }
+
+  return {
+    updateAvailable: true,
+    installedVersion,
+    latestVersion,
+    isDowngrade: compatibility.isDowngrade,
+    isMajorBump: compatibility.isMajorBump,
+    requiresMigration: compatibility.requiresMigration,
+    message: `Update available: v${installedVersion} → v${latestVersion}${compatibility.requiresMigration ? ' (major upgrade — migration may be required)' : ''}.`,
+  };
 }
 
 // ============================================================================
 
 export const MaskweaverPlugin: Plugin = async ({ client, directory, project, worktree, $, serverUrl }) => {
   // ==========================================================================
-  // 0. Check package cache version and invalidate if stale
+  // 0. Check for updates (oh-my-openagent style — npm registry HTTP fetch)
   // ==========================================================================
-  const cacheCheck = checkAndInvalidateCache();
-  if (cacheCheck.invalidated) {
-    pluginLog(client, 'warn', `Stale plugin cache detected (v${cacheCheck.cachedVersion}). Cleared — v${cacheCheck.latestVersion} will install on next restart.`);
-    pluginLog(client, 'warn', `Please restart OpenCode to activate maskweaver v${VERSION}.`);
-  } else if (cacheCheck.cachedVersion && cacheCheck.cachedVersion !== VERSION) {
-    pluginLog(client, 'info', `Plugin cache v${cacheCheck.cachedVersion} — current is v${VERSION}. Restart recommended.`);
+  const updateCheck = await checkForUpdates();
+  if (updateCheck.updateAvailable) {
+    if (updateCheck.isDowngrade) {
+      pluginLog(client, 'warn', `Downgrade detected (v${updateCheck.installedVersion} → v${updateCheck.latestVersion}) — not allowed. Please use opencode --upgrade.`);
+    } else {
+      pluginLog(client, 'warn', `Update available: maskweaver v${updateCheck.installedVersion} → v${updateCheck.latestVersion}`);
+      if (updateCheck.requiresMigration) {
+        pluginLog(client, 'warn', `Major version upgrade — configuration migration may be required.`);
+      }
+      pluginLog(client, 'info', `Run \`opencode --upgrade\` or \`npm update -g maskweaver\` to update.`);
+    }
+  } else if (updateCheck.message) {
+    pluginLog(client, 'info', updateCheck.message);
   }
   // ==========================================================================
   // 1. Load Configuration (oh-my-opencode pattern)

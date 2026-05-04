@@ -27,7 +27,7 @@ import { preparePhaseExecution, formatExecutionPlan, runAIVerification, generate
 import { archiveChange } from '../../weave/stages/archive.js';
 import { handoff, generateStatusReport, handleUserResponse } from '../../weave/stages/handoff.js';
 import { analyzeCodebase, runGraphifyAnalysis, readMapResult } from '../../weave/stages/map.js';
-import { interview as interviewStage, injectMapContext } from '../../weave/stages/intake.js';
+import { interview as interviewStage, injectMapContext, loadInterviewState, listInterviewStates } from '../../weave/stages/intake.js';
 import { executeBuildLoop, generateBuildState, generateBuildId, loadBuildState } from '../../weave/stages/build.js';
 import { generateOpenSpecArtifacts, ensureOpenSpecWorkspace } from '../../weave/stages/openspec.js';
 import { WeaveOrchestrator } from '../../weave/orchestrator.js';
@@ -46,7 +46,7 @@ import { ensureGitRepo, stageAllChanges, listStagedFiles, hasStagedChanges, comm
 import { scanFilesForSecrets, loadSecretScanConfig, shouldBlockOnFindings, formatSecretScanReport } from '../../weave/security/secret-scan.js';
 import { searchTroubleshooting, recordTroubleshooting, GlobalKnowledge } from '../../weave/knowledge/global.js';
 import { ensureChangeArtifact, readChangeMetadata, writeChangeVerificationReport } from '../../weave/change-artifacts.js';
-import type { WeavePhase, WeavePlan } from '../../weave/types.js';
+import type { WeavePhase, WeavePlan, GherkinScenario } from '../../weave/types.js';
 import { analyzeParallelOpportunities, executionPlanToSquadTasks } from '../../weave/bridge.js';
 import {
     acquireLoopOperatorLock,
@@ -2261,13 +2261,33 @@ async function handleMap(
 async function handleInterview(
     args: {
         docsPath?: string;
+        /** Resume an existing interview by its ID */
+        resumeId?: string;
     },
     basePath: string
 ): Promise<string> {
     const docsPath = args.docsPath || 'docs';
     const lines: string[] = [];
+
+    // Check for existing interview state
+    const existingStates = listInterviewStates(basePath);
+    const canResume = existingStates.some(s => s.status === 'in_progress');
+
     lines.push('## 💬 Interview');
     lines.push('');
+
+    if (canResume && !args.resumeId) {
+        lines.push('### 📋 Existing Interviews');
+        lines.push('');
+        for (const state of existingStates) {
+            const statusIcon = state.status === 'in_progress' ? '🔄' : '✅';
+            lines.push(`- ${statusIcon} \`${state.id}\` — ${state.rounds} rounds, **${state.status}**`);
+        }
+        lines.push('');
+        lines.push('To resume an interview, use: `weave command=interview resumeId="<id>"`');
+        lines.push('To start fresh: `weave command=interview`');
+        lines.push('');
+    }
 
     const mapResult = await readMapResult(basePath);
     if (mapResult) {
@@ -2286,16 +2306,68 @@ async function handleInterview(
             docsPath,
             basePath,
             mapResult,
+            resumeId: args.resumeId,
         });
 
-        lines.push(`### Documents Analyzed`);
+        // Documents and features summary
+        lines.push('### 📄 Documents Analyzed');
         lines.push(`- ${interviewResult.intake.documents.length} document(s) analyzed`);
         lines.push(`- ${interviewResult.intake.features.length} feature(s) identified`);
         lines.push('');
 
+        // Features list
+        if (interviewResult.intake.features.length > 0) {
+            lines.push('**Features:**');
+            for (const feature of interviewResult.intake.features) {
+                lines.push(`  - ${feature}`);
+            }
+            lines.push('');
+        }
+
+        // Ambiguity Score
+        if (interviewResult.ambiguityScore) {
+            const score = interviewResult.ambiguityScore;
+            const milestoneIcon = score.milestone === 'ready' ? '✅'
+                : score.milestone === 'refined' ? '🟡'
+                    : score.milestone === 'progress' ? '🟠'
+                        : '🔴';
+
+            lines.push('### 📊 Ambiguity Score');
+            lines.push('');
+            lines.push(`**${milestoneIcon} ${(score.overallScore * 100).toFixed(1)}% Ambiguity [${score.milestone.toUpperCase()}]**`);
+            lines.push(`_${score.milestoneDescription}_`);
+            lines.push('');
+
+            // Component breakdown
+            lines.push('| Component | Clarity | Weight |');
+            lines.push('|-----------|---------|--------|');
+            const components = [
+                score.breakdown.goalClarity,
+                score.breakdown.constraintClarity,
+                score.breakdown.successCriteriaClarity,
+            ];
+            if (score.breakdown.contextClarity) {
+                components.push(score.breakdown.contextClarity);
+            }
+            for (const comp of components) {
+                const bar = '█'.repeat(Math.round(comp.clarityScore * 10)) + '░'.repeat(10 - Math.round(comp.clarityScore * 10));
+                lines.push(`| ${comp.name} | ${bar} ${(comp.clarityScore * 100).toFixed(0)}% | ${(comp.weight * 100).toFixed(0)}% |`);
+            }
+            lines.push('');
+
+            lines.push(`**Weakest area:** ${score.weakestArea}`);
+            if (score.nextMilestone) {
+                lines.push(`**Next milestone:** ${score.nextMilestone.label} (<= ${(score.nextMilestone.threshold * 100).toFixed(0)}%) — ${score.nextMilestone.description}`);
+            }
+            lines.push('');
+            lines.push(`**Ready for Seed:** ${score.isReadyForSeed ? '✅ Yes' : '❌ No (ambiguity > 20%)'}`);
+            lines.push(`**Ready for Gherkin:** ${score.readinessForGherkin ? '✅ Yes' : '❌ No (ambiguity > 30%)'}`);
+            lines.push('');
+        }
+
+        // Structural changes
         if (interviewResult.intake.structuralChanges && interviewResult.intake.structuralChanges.length > 0) {
             lines.push('### ⚠️ Structural Changes Detected');
-            lines.push('The following structural changes were identified from codebase analysis:');
             lines.push('');
             for (const sc of interviewResult.intake.structuralChanges) {
                 const icon = sc.breaking ? '🔴' : '🟡';
@@ -2305,14 +2377,75 @@ async function handleInterview(
                 lines.push(`  - Status: ${sc.agreed ? '✅ Agreed' : '⏳ Pending approval'}`);
             }
             lines.push('');
-            lines.push('To proceed, agree to structural changes via `weave command=approve`.');
-            lines.push('');
         }
 
-        lines.push('### Questions');
-        lines.push('Review the features and technical requirements above.');
-        lines.push('');
-        lines.push('Next: `weave command=design docsPath="docs/"` to create the plan.');
+        // Generated Gherkin scenarios
+        if (interviewResult.generatedScenarios && interviewResult.generatedScenarios.length > 0) {
+            lines.push('### 🥒 Generated Gherkin Scenarios');
+            lines.push('');
+            const byFeature = new Map<string, GherkinScenario[]>();
+            for (const scenario of interviewResult.generatedScenarios) {
+                const existing = byFeature.get(scenario.feature) || [];
+                existing.push(scenario);
+                byFeature.set(scenario.feature, existing);
+            }
+            for (const [feature, scenarios] of byFeature) {
+                lines.push(`**Feature: ${feature}**`);
+                lines.push('');
+                for (const scenario of scenarios) {
+                    lines.push(`  \`\`\`gherkin`);
+                    lines.push(`  Scenario: ${scenario.scenario}`);
+                    for (const g of scenario.given) lines.push(`    Given ${g}`);
+                    for (const w of scenario.when) lines.push(`    When ${w}`);
+                    for (const t of scenario.then) lines.push(`    Then ${t}`);
+                    lines.push(`  \`\`\``);
+                    lines.push('');
+                }
+            }
+        }
+
+        // Questions
+        if (interviewResult.intake.questions.length > 0) {
+            lines.push('### ❓ Questions');
+            lines.push('');
+            lines.push('Answer the following questions to reduce ambiguity and generate better Gherkin scenarios:');
+            lines.push('');
+            for (const q of interviewResult.intake.questions) {
+                const typeLabel = q.questionType === 'gherkin-given' ? '[GIVEN]'
+                    : q.questionType === 'gherkin-when' ? '[WHEN]'
+                        : q.questionType === 'gherkin-then' ? '[THEN]'
+                            : q.questionType === 'edge-case' ? '[EDGE]'
+                                : q.questionType === 'constraint' ? '[CONSTRAINT]'
+                                    : '';
+                lines.push(`**Q${q.id.replace('Q', '')}:** ${typeLabel ? typeLabel + ' ' : ''}${q.question}`);
+                if (q.targetFeature) {
+                    lines.push(`  → Target: _${q.targetFeature}_`);
+                }
+                if (q.options && q.options.length > 0) {
+                    lines.push(`  Options: ${q.options.join(' | ')}`);
+                }
+                if (q.required) {
+                    lines.push(`  ⚠️ _Required_`);
+                }
+                lines.push('');
+            }
+        }
+
+        // Multi-round indicator
+        if (interviewResult.isMultiRound) {
+            lines.push('---');
+            lines.push('');
+            lines.push(`**Interview Round ${(interviewResult.interviewState?.currentRound || 1)} complete.**`);
+            lines.push('More questions exist to refine requirements. Answer the remaining questions above and run `weave command=interview` again.');
+            lines.push(`Interview ID: \`${interviewResult.interviewState?.interviewId}\``);
+            lines.push('');
+        } else if (interviewResult.satisfied) {
+            lines.push('---');
+            lines.push('');
+            lines.push('✅ **Requirements are clear. Ready to generate specification and plan.**');
+            lines.push('');
+            lines.push('Next: `weave command=design docsPath="docs/"` to create the plan with full Gherkin acceptance criteria.');
+        }
     } catch (e: any) {
         return `Error during interview: ${e.message || e}`;
     }

@@ -687,9 +687,23 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
     }
 
     // Generate Gherkin acceptance criteria for each phase
+    // Prioritize interview-generated scenarios from intake
+    const intakeScenarios = intake.generatedScenarios;
     for (const phase of weavePlan.phases) {
         if (!phase.acceptanceCriteria || phase.acceptanceCriteria.length === 0) {
-            phase.acceptanceCriteria = generateGherkinForPhase(phase);
+            // Try to match interview-generated scenarios to this phase by feature name
+            const matchingScenarios = intakeScenarios
+                ? intakeScenarios.filter(s =>
+                    s.feature.toLowerCase().includes(phase.name.toLowerCase())
+                    || phase.name.toLowerCase().includes(s.feature.toLowerCase().slice(0, 10))
+                )
+                : [];
+
+            if (matchingScenarios.length > 0) {
+                phase.acceptanceCriteria = matchingScenarios;
+            } else {
+                phase.acceptanceCriteria = generateGherkinForPhase(phase);
+            }
         }
     }
 

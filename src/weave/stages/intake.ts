@@ -1,7 +1,7 @@
 /**
  * Weave Intake Stage
- * 
- * Document analysis and question generation.
+ *
+ * Document analysis, feature extraction, and interview orchestration.
  * Uses Maskweaver memory for semantic search of past similar projects.
  */
 
@@ -11,47 +11,23 @@ import type { WeaveEvent, EnvironmentAnalysis, MapResult, StructuralChange, Cons
 import { analyzeEnvironment } from '../environment/index.js';
 import { readMapResult } from './map.js';
 
-// ============================================================================
-// Types
-// ============================================================================
+// Import from sub-modules
+export type {
+    IntakeOptions, IntakeResult, DocumentAnalysis, Question,
+    AmbiguityComponent, AmbiguityBreakdown, AmbiguityScore,
+    InterviewRound, InterviewState, InterviewOptions, InterviewResult,
+    IntakeWithAnalysisOptions,
+} from './intake-types.js';
 
-export interface IntakeOptions {
-    docsPath: string;
-    onEvent?: (event: WeaveEvent) => void;
-}
-
-export interface IntakeResult {
-    documents: DocumentAnalysis[];
-    features: string[];
-    domainTerms: { term: string; description?: string }[];
-    technicalRequirements: {
-        frontend?: string[];
-        backend?: string[];
-        database?: string[];
-        other?: string[];
-    };
-    questions: Question[];
-    similarProjects?: string[];  // From memory search
-    environment?: EnvironmentAnalysis;  // Proactive environment analysis
-    codebaseMapPath?: string;     // Path to map-result.yaml if available
-    structuralChanges?: StructuralChange[];  // Detected structural changes from map
-    consentPrompts?: ConsentPrompt[];  // Generated consent prompts for user
-}
-
-export interface DocumentAnalysis {
-    path: string;
-    title: string;
-    sections: string[];
-    keyPoints: string[];
-}
-
-export interface Question {
-    id: string;
-    topic: string;
-    question: string;
-    options?: string[];
-    required: boolean;
-}
+export { scoreAmbiguity } from './intake-ambiguity.js';
+export {
+    generateQuestions, generateInterviewQuestions,
+    generateGherkinQuestions, generateAcceptanceCriteriaFromAnswers,
+} from './intake-questions.js';
+export {
+    saveInterviewState, loadInterviewState, listInterviewStates,
+    getInterviewDir,
+} from './intake-persistence.js';
 
 // ============================================================================
 // Document Discovery
@@ -68,7 +44,6 @@ function discoverDocuments(basePath: string): string[] {
 
         const entries = fs.readdirSync(dir, { withFileTypes: true });
 
-        // Prioritize index files
         for (const indexFile of INDEX_FILES) {
             const indexPath = path.join(dir, indexFile);
             if (fs.existsSync(indexPath)) {
@@ -98,55 +73,40 @@ function discoverDocuments(basePath: string): string[] {
 // Document Analysis
 // ============================================================================
 
+import type { DocumentAnalysis } from './intake-types.js';
+
 function analyzeDocument(filePath: string): DocumentAnalysis {
     const content = fs.readFileSync(filePath, 'utf-8');
     const fileName = path.basename(filePath);
 
-    // Extract title (first H1 or filename)
     const titleMatch = content.match(/^#\s+(.+)$/m);
     const title = titleMatch ? titleMatch[1] : fileName.replace(/\.[^.]+$/, '');
 
-    // Extract sections (H2 headers)
     const sectionMatches = content.match(/^##\s+(.+)$/gm) || [];
     const sections = sectionMatches.map(s => s.replace(/^##\s+/, ''));
 
-    // Extract key points (bullet points under important headers)
     const keyPoints: string[] = [];
     const bulletMatches = content.match(/^[-*]\s+(.+)$/gm) || [];
     for (const bullet of bulletMatches.slice(0, 10)) {
         keyPoints.push(bullet.replace(/^[-*]\s+/, ''));
     }
 
-    return {
-        path: filePath,
-        title,
-        sections,
-        keyPoints,
-    };
+    return { path: filePath, title, sections, keyPoints };
 }
 
 // ============================================================================
 // Feature Extraction
 // ============================================================================
 
-const FEATURE_PATTERNS = [
-    /(?:기능|feature|functionality)[:：]\s*(.+)/gi,
-    /(?:할 수 있다|can|should|must)\s+(.+)/gi,
-    /(?:구현|implement|build|create)\s+(.+)/gi,
-];
-
 function extractFeatures(documents: DocumentAnalysis[]): string[] {
     const features = new Set<string>();
 
     for (const doc of documents) {
-        // From key points
         for (const point of doc.keyPoints) {
             if (point.length > 10 && point.length < 100) {
                 features.add(point);
             }
         }
-
-        // From sections
         for (const section of doc.sections) {
             if (section.length > 5 && section.length < 50) {
                 features.add(section);
@@ -160,6 +120,8 @@ function extractFeatures(documents: DocumentAnalysis[]): string[] {
 // ============================================================================
 // Technical Requirements Detection
 // ============================================================================
+
+import type { IntakeResult } from './intake-types.js';
 
 const TECH_PATTERNS: Record<string, RegExp[]> = {
     frontend: [
@@ -177,9 +139,7 @@ const TECH_PATTERNS: Record<string, RegExp[]> = {
     ],
 };
 
-function detectTechnicalRequirements(
-    documents: DocumentAnalysis[]
-): IntakeResult['technicalRequirements'] {
+function detectTechnicalRequirements(documents: DocumentAnalysis[]): IntakeResult['technicalRequirements'] {
     const result: IntakeResult['technicalRequirements'] = {};
 
     const allText = documents.map(d => d.keyPoints.join(' ') + ' ' + d.sections.join(' ')).join(' ');
@@ -193,58 +153,11 @@ function detectTechnicalRequirements(
             }
         }
         if (detected.length > 0) {
-            result[category as keyof typeof result] = [...new Set(detected)];
+            (result as any)[category] = [...new Set(detected)];
         }
     }
 
     return result;
-}
-
-// ============================================================================
-// Question Generation
-// ============================================================================
-
-function generateQuestions(
-    features: string[],
-    techReqs: IntakeResult['technicalRequirements']
-): Question[] {
-    const questions: Question[] = [];
-    let qId = 1;
-
-    // If no frontend detected, ask
-    if (!techReqs.frontend || techReqs.frontend.length === 0) {
-        questions.push({
-            id: `Q${qId++}`,
-            topic: '프론트엔드 기술',
-            question: '프론트엔드 프레임워크 선호도가 있으신가요?',
-            options: ['React', 'Vue', 'Next.js', 'Vanilla JS', '상관없음'],
-            required: true,
-        });
-    }
-
-    // If no database detected, ask
-    if (!techReqs.database || techReqs.database.length === 0) {
-        questions.push({
-            id: `Q${qId++}`,
-            topic: '데이터 저장',
-            question: '데이터를 어디에 저장할까요?',
-            options: ['로컬 스토리지 (오프라인)', '서버 DB (PostgreSQL/MySQL)', '클라우드 (Supabase/Firebase)'],
-            required: true,
-        });
-    }
-
-    // Priority question
-    if (features.length > 3) {
-        questions.push({
-            id: `Q${qId++}`,
-            topic: '우선순위',
-            question: '가장 먼저 완성해야 하는 기능은 무엇인가요?',
-            options: features.slice(0, 5),
-            required: true,
-        });
-    }
-
-    return questions;
 }
 
 // ============================================================================
@@ -258,76 +171,45 @@ interface SimilarProjectResult {
     lessons?: string;
 }
 
-/**
- * Search memory for similar past projects based on features.
- * Uses hybrid search (vector + text) from memory module.
- */
 async function searchSimilarProjects(
     features: string[],
-    techStack: string[]
+    techStack: string[],
 ): Promise<SimilarProjectResult[]> {
     const results: SimilarProjectResult[] = [];
 
     try {
-        // Dynamic import to avoid circular dependencies
         const memoryModule = await import('../../memory/index.js');
-
-        // Build query from features and tech stack
         const query = [...features.slice(0, 5), ...techStack].join(' ');
 
-        // Get database instance (returns null if not initialized)
         const db = memoryModule.tryGetDatabase();
         if (!db) {
             console.log('[Intake] Memory database not initialized, skipping similar project search');
             return results;
         }
 
-        // Create a text-only provider for simple search
-        // ProviderConfig uses 'type' not 'provider'
-        const provider = memoryModule.createProvider({
-            type: 'text-only' as const,
-        });
+        const provider = memoryModule.createProvider({ type: 'text-only' as const });
 
-        // Use hybridSearch or fall back to text search
         let searchResults: Array<{ chunk: { path: string; text: string }; score: number }> = [];
 
         if (provider) {
-            // Try semantic search if provider available
-            // embed() takes string[] and returns Embedding[] (number[][])
             const embeddingResult = await provider.embed([query]);
-            const embedding = embeddingResult[0];  // Get first (only) embedding
-
-            // hybridSearch takes (query, queryEmbedding, options)
-            searchResults = memoryModule.hybridSearch(query, embedding, {
-                limit: 5,
-                minScore: 0.3,
-            });
+            const embedding = embeddingResult[0];
+            searchResults = memoryModule.hybridSearch(query, embedding, { limit: 5, minScore: 0.3 });
         } else {
             console.log('[Intake] Provider not available, using text search only');
-            // Fall back to text-only search
             const textResults = db.searchByText(query, 5);
-            searchResults = textResults.map((r: any) => ({
-                chunk: r.chunk,
-                score: r.score || 0.5, // Default score for text matches
-            }));
+            searchResults = textResults.map((r: any) => ({ chunk: r.chunk, score: r.score || 0.5 }));
         }
 
-        // Process results to extract project insights
         for (const result of searchResults) {
             const { chunk, score } = result;
-
-            // Try to extract project name from path
             const pathParts = chunk.path.split(/[/\\]/);
             const projectName = pathParts.find((p: string) =>
-                !p.startsWith('.') &&
-                p !== 'memory' &&
-                p !== 'daily' &&
-                !p.endsWith('.md')
+                !p.startsWith('.') && p !== 'memory' && p !== 'daily' && !p.endsWith('.md'),
             ) || 'Previous Project';
 
-            // Extract relevant features mentioned
             const relevantFeatures = features.filter(f =>
-                chunk.text.toLowerCase().includes(f.toLowerCase().slice(0, 10))
+                chunk.text.toLowerCase().includes(f.toLowerCase().slice(0, 10)),
             );
 
             if (relevantFeatures.length > 0 || score > 0.5) {
@@ -340,7 +222,6 @@ async function searchSimilarProjects(
             }
         }
     } catch (e) {
-        // Memory search is optional, don't fail intake
         console.log('[Intake] Similar project search failed:', e);
     }
 
@@ -353,7 +234,7 @@ async function searchSimilarProjects(
 
 export async function injectMapContext(
     map: MapResult | null,
-    features: string[]
+    features: string[],
 ): Promise<{ structuralChanges: StructuralChange[]; consentPrompts: ConsentPrompt[] }> {
     const structuralChanges: StructuralChange[] = [];
     const consentPrompts: ConsentPrompt[] = [];
@@ -366,7 +247,7 @@ export async function injectMapContext(
         const area = issue.area;
         const promptId = `consent-${area.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
 
-        const change: StructuralChange = {
+        structuralChanges.push({
             area,
             currentState: issue.description,
             proposedChange: issue.suggestion,
@@ -375,8 +256,7 @@ export async function injectMapContext(
             affectedFiles: issue.affectedFiles,
             breaking: issue.severity === 'critical',
             agreed: false,
-        };
-        structuralChanges.push(change);
+        });
 
         consentPrompts.push({
             id: promptId,
@@ -386,12 +266,7 @@ export async function injectMapContext(
             rationale: `"${issue.title}" — ${issue.description}`,
             impact: issue.severity === 'critical' ? 'high' : 'medium',
             breaking: issue.severity === 'critical',
-            options: [
-                '승인 — 지금 수정',
-                '승인 — build 단계에서 수정',
-                '보류 — 이후 재검토',
-                '무시 — 현재 구조 유지',
-            ],
+            options: ['승인 — 지금 수정', '승인 — build 단계에서 수정', '보류 — 이후 재검토', '무시 — 현재 구조 유지'],
             agreed: false,
         });
     }
@@ -399,115 +274,14 @@ export async function injectMapContext(
     return { structuralChanges, consentPrompts };
 }
 
-function generateInterviewQuestions(
-    features: string[],
-    techReqs: IntakeResult['technicalRequirements'],
-    map: MapResult | null
-): Question[] {
-    const questions = generateQuestions(features, techReqs);
-
-    if (map && map.structuralIssues.length > 0) {
-        const critical = map.structuralIssues.filter(i => i.severity === 'critical');
-        const warnings = map.structuralIssues.filter(i => i.severity === 'warning');
-        if (critical.length > 0) {
-            questions.unshift({
-                id: 'MAP-CRITICAL',
-                topic: '구조적 문제',
-                question: `코드베이스에서 ${critical.length}개의 Critical 이슈가 발견되었습니다. 계속 진행할까요?`,
-                options: ['이슈를 먼저 해결', '진행하되 build 단계에서 해결', '지금은 무시'],
-                required: true,
-            });
-        }
-        if (warnings.length > 0) {
-            questions.push({
-                id: 'MAP-WARNINGS',
-                topic: '권장 구조 변경',
-                question: `${warnings.length}개의 경고가 있습니다. 구조 변경 권장사항을 검토하시겠습니까?`,
-                options: ['검토', '나중에 검토', '무시'],
-                required: false,
-            });
-        }
-    }
-
-    if (features.length > 0) {
-        questions.push({
-            id: 'EXISTING-CODE',
-            topic: '기존 코드 활용',
-            question: '기존 코드베이스의 구조나 패턴을 유지하면서 구현하시겠습니까?',
-            options: ['최대한 기존 구조 유지', '필요시 구조 변경', '새로 작성'],
-            required: true,
-        });
-    }
-
-    return questions;
-}
-
 // ============================================================================
-// Interview — Multi-step Question Asking Until Clarity
+// Main Intake Function
 // ============================================================================
 
-export interface InterviewOptions {
-    docsPath: string;
-    basePath?: string;
-    mapResult?: MapResult | null;
-    onEvent?: (event: WeaveEvent) => void;
-}
-
-export interface InterviewResult {
-    intake: IntakeResult;
-    agreedStructuralChanges: StructuralChange[];
-    userAnswers: Record<string, string>;
-    satisfied: boolean;  // true when user has answered enough to proceed
-}
-
-export async function interview(options: InterviewOptions): Promise<InterviewResult> {
-    const basePath = options.basePath || process.cwd();
-
-    const intakeResult = await intake({
-        docsPath: options.docsPath,
-        onEvent: options.onEvent,
-    });
-
-    const map = options.mapResult !== undefined
-        ? options.mapResult
-        : await readMapResult(basePath);
-
-    const { structuralChanges, consentPrompts } = await injectMapContext(map, intakeResult.features);
-
-    const enhancedQuestions = generateInterviewQuestions(
-        intakeResult.features,
-        intakeResult.technicalRequirements,
-        map
-    );
-
-    const intakeWithMap: IntakeResult = {
-        ...intakeResult,
-        codebaseMapPath: map ? map.mapPath : undefined,
-        structuralChanges: structuralChanges.length > 0 ? structuralChanges : undefined,
-        consentPrompts: consentPrompts.length > 0 ? consentPrompts : undefined,
-    };
-
-    const hasUnansweredQuestions = enhancedQuestions.length > 0;
-    const hasPendingConsent = consentPrompts.length > 0 && consentPrompts.some(cp => !cp.agreed);
-
-    return {
-        intake: intakeWithMap,
-        agreedStructuralChanges: structuralChanges.filter(sc => sc.agreed),
-        userAnswers: {},
-        satisfied: !hasUnansweredQuestions && !hasPendingConsent,
-    };
-}
-
-// ============================================================================
-// Main Intake Function (Legacy — Enhanced)
-// ============================================================================
-
-export interface IntakeWithAnalysisOptions extends IntakeOptions {
-    /** Skip environment analysis for faster intake */
-    skipEnvironmentAnalysis?: boolean;
-    /** Only include warning+ severity issues in environment analysis */
-    warningsOnly?: boolean;
-}
+import type { IntakeOptions, IntakeWithAnalysisOptions, InterviewOptions, InterviewResult, InterviewRound } from './intake-types.js';
+import { scoreAmbiguity } from './intake-ambiguity.js';
+import { generateQuestions, generateInterviewQuestions, generateGherkinQuestions, generateAcceptanceCriteriaFromAnswers } from './intake-questions.js';
+import { saveInterviewState, loadInterviewState } from './intake-persistence.js';
 
 export async function intake(options: IntakeOptions | IntakeWithAnalysisOptions): Promise<IntakeResult> {
     const { docsPath } = options;
@@ -515,7 +289,6 @@ export async function intake(options: IntakeOptions | IntakeWithAnalysisOptions)
     const skipEnvironmentAnalysis = extendedOptions.skipEnvironmentAnalysis ?? false;
     const warningsOnly = extendedOptions.warningsOnly ?? false;
 
-    // Resolve path
     const absolutePath = path.isAbsolute(docsPath)
         ? docsPath
         : path.join(process.cwd(), docsPath);
@@ -524,7 +297,6 @@ export async function intake(options: IntakeOptions | IntakeWithAnalysisOptions)
         throw new Error(`Documents path not found: ${absolutePath}`);
     }
 
-    // Discover documents
     const docPaths = fs.statSync(absolutePath).isDirectory()
         ? discoverDocuments(absolutePath)
         : [absolutePath];
@@ -533,35 +305,28 @@ export async function intake(options: IntakeOptions | IntakeWithAnalysisOptions)
         throw new Error(`No documents found in: ${absolutePath}`);
     }
 
-    // Analyze each document
     const documents = docPaths.map(analyzeDocument);
-
-    // Extract information
     const features = extractFeatures(documents);
     const technicalRequirements = detectTechnicalRequirements(documents);
     const questions = generateQuestions(features, technicalRequirements);
 
-    // Build tech stack array for memory search
     const techStack: string[] = [
         ...(technicalRequirements.frontend || []),
         ...(technicalRequirements.backend || []),
         ...(technicalRequirements.database || []),
     ];
 
-    // Search memory for similar past projects
     const similarProjectResults = await searchSimilarProjects(features, techStack);
     const similarProjects = similarProjectResults.map(r =>
-        `${r.projectName} (${(r.similarity * 100).toFixed(0)}% 유사): ${r.relevantFeatures.join(', ')}`
+        `${r.projectName} (${(r.similarity * 100).toFixed(0)}% 유사): ${r.relevantFeatures.join(', ')}`,
     );
 
-    // Proactive environment analysis
     let environment: EnvironmentAnalysis | undefined;
     if (!skipEnvironmentAnalysis) {
         try {
-            // Get the project directory (parent of docs path or current working directory)
             const projectPath = fs.statSync(absolutePath).isDirectory()
-                ? path.dirname(absolutePath)  // Parent of docs folder
-                : path.dirname(absolutePath); // Same for single file
+                ? path.dirname(absolutePath)
+                : path.dirname(absolutePath);
 
             environment = await analyzeEnvironment({
                 projectPath: projectPath !== '.' ? projectPath : process.cwd(),
@@ -569,7 +334,6 @@ export async function intake(options: IntakeOptions | IntakeWithAnalysisOptions)
                 includeProjectHistory: true,
             });
 
-            // Log critical issues
             const criticalIssues = environment.issues.filter(i => i.severity === 'critical');
             if (criticalIssues.length > 0) {
                 console.log(`\n⚠️  [Intake] ${criticalIssues.length}개의 Critical 이슈가 감지되었습니다!`);
@@ -588,16 +352,147 @@ export async function intake(options: IntakeOptions | IntakeWithAnalysisOptions)
         ? await injectMapContext(mapResult, features)
         : { structuralChanges: [] };
 
+    const baselineAmbiguity = scoreAmbiguity(
+        features, technicalRequirements, {},
+        undefined, mapResult !== null, mapResult !== null,
+    );
+
     return {
         documents,
         features,
-        domainTerms: [], // TODO: Extract domain-specific terminology
+        domainTerms: [],
         technicalRequirements,
         questions,
         similarProjects: similarProjects.length > 0 ? similarProjects : undefined,
         environment,
         codebaseMapPath: mapResult?.mapPath,
         structuralChanges: structuralChanges.length > 0 ? structuralChanges : undefined,
+        ambiguityScore: baselineAmbiguity,
     };
 }
 
+// ============================================================================
+// Multi-Round Interview Orchestrator
+// ============================================================================
+
+export async function interview(options: InterviewOptions): Promise<InterviewResult> {
+    const basePath = options.basePath || process.cwd();
+    const now = new Date().toISOString();
+
+    let interviewState = options.resumeId
+        ? loadInterviewState(basePath, options.resumeId)
+        : (!options.userAnswers ? loadInterviewState(basePath) : null);
+
+    const intakeResult = await intake({ docsPath: options.docsPath, onEvent: options.onEvent });
+
+    const map = options.mapResult !== undefined
+        ? options.mapResult
+        : await readMapResult(basePath);
+
+    const { structuralChanges, consentPrompts } = await injectMapContext(map, intakeResult.features);
+
+    const existingAnswers: Record<string, string> = interviewState
+        ? Object.assign({}, ...interviewState.rounds.map(r => r.answers))
+        : {};
+    const roundAnswers = options.userAnswers || {};
+    const allAnswers: Record<string, string> = { ...existingAnswers, ...roundAnswers };
+
+    const isBrownfield = map !== null;
+
+    const doneWhenMap: Record<string, string> = {};
+    for (const feature of intakeResult.features) {
+        doneWhenMap[feature] = `유저가 ${feature.toLowerCase().replace(/[을를이가은는]/g, '')}할 수 있다`;
+    }
+    const generatedScenarios = Object.keys(allAnswers).length > 0
+        ? generateAcceptanceCriteriaFromAnswers(intakeResult.features, allAnswers, doneWhenMap)
+        : undefined;
+
+    const ambiguityScore = scoreAmbiguity(
+        intakeResult.features, intakeResult.technicalRequirements, allAnswers,
+        generatedScenarios, isBrownfield, map !== null,
+    );
+
+    const baseQuestions = generateQuestions(intakeResult.features, intakeResult.technicalRequirements);
+    const mapQuestions = generateInterviewQuestions(intakeResult.features, intakeResult.technicalRequirements, map);
+
+    const seenIds = new Set<string>();
+    const mergedQuestions = [...baseQuestions, ...mapQuestions].filter(q => {
+        if (seenIds.has(q.id)) return false;
+        seenIds.add(q.id);
+        return true;
+    });
+
+    let gherkinQuestions = (!options.skipGherkinQuestions && !ambiguityScore.isReadyForSeed)
+        ? generateGherkinQuestions(intakeResult.features, mergedQuestions, allAnswers, ambiguityScore)
+        : [];
+
+    const enhancedQuestions = mergedQuestions.filter(
+        q => !Object.keys(allAnswers).some(k =>
+            k.toLowerCase().includes(q.id.toLowerCase())
+            || k.toLowerCase().includes((q.targetFeature || '').toLowerCase()),
+        ),
+    );
+
+    const allQuestions = [...enhancedQuestions, ...gherkinQuestions];
+
+    const interviewId = interviewState?.interviewId
+        || `interview_${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    const roundNumber = interviewState ? interviewState.rounds.length + 1 : 1;
+
+    const currentRound: InterviewRound = {
+        roundNumber,
+        questions: allQuestions,
+        answers: roundAnswers,
+        ambiguityBefore: interviewState?.rounds[interviewState.rounds.length - 1]?.ambiguityAfter,
+        ambiguityAfter: ambiguityScore,
+        gherkinGenerated: generatedScenarios,
+        timestamp: now,
+    };
+
+    if (interviewState) {
+        interviewState.rounds.push(currentRound);
+        interviewState.currentRound = roundNumber;
+        interviewState.status = ambiguityScore.isReadyForSeed ? 'completed' : 'in_progress';
+        interviewState.features = intakeResult.features;
+        interviewState.isBrownfield = isBrownfield;
+        interviewState.updatedAt = now;
+    } else {
+        interviewState = {
+            interviewId,
+            status: ambiguityScore.isReadyForSeed ? 'completed' : 'in_progress',
+            initialContext: intakeResult.features.join(', '),
+            rounds: [currentRound],
+            currentRound: 1,
+            features: intakeResult.features,
+            isBrownfield,
+            createdAt: now,
+            updatedAt: now,
+        };
+    }
+
+    saveInterviewState(basePath, interviewState);
+
+    const intakeWithEverything: IntakeResult = {
+        ...intakeResult,
+        codebaseMapPath: map ? map.mapPath : undefined,
+        structuralChanges: structuralChanges.length > 0 ? structuralChanges : undefined,
+        consentPrompts: consentPrompts.length > 0 ? consentPrompts : undefined,
+        ambiguityScore,
+        generatedScenarios,
+        questions: allQuestions,
+    };
+
+    const hasUnansweredQuestions = allQuestions.some(q => q.required);
+    const hasPendingConsent = consentPrompts.length > 0 && consentPrompts.some(cp => !cp.agreed);
+
+    return {
+        intake: intakeWithEverything,
+        agreedStructuralChanges: structuralChanges.filter(sc => sc.agreed),
+        userAnswers: allAnswers,
+        satisfied: ambiguityScore.isReadyForSeed && !hasUnansweredQuestions && !hasPendingConsent,
+        ambiguityScore,
+        generatedScenarios,
+        interviewState,
+        isMultiRound: !ambiguityScore.isReadyForSeed || hasUnansweredQuestions || hasPendingConsent,
+    };
+}

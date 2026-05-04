@@ -265,12 +265,14 @@ const INLINE_DEFAULT: CommandsJson = {
             args: [
                 { name: 'sync', type: 'boolean', default: false, description: 'Force regenerate agent .md files from config pool' },
                 { name: 'init', type: 'boolean', default: false, description: 'Create default maskweaver.config.json with pool template' },
+                { name: 'force', type: 'boolean', default: false, description: 'Force re-detect subscription and overwrite maskweaver.config.json' },
             ],
             mdFile: 'weave-agents.md',
             handler: 'handleAgents',
             examples: [
                 'weave command=agents sync=true',
                 'weave command=agents init=true',
+                'weave command=agents force=true',
             ],
         },
         {

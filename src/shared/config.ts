@@ -243,6 +243,8 @@ export interface ModelPoolEntry {
   capabilities: ModelCapability[];
   /** Cost tier for budget-aware scheduling */
   costTier: ModelCostTier;
+  /** Priority within the same tier (higher = preferred first, default: 0) */
+  priority?: number;
   /** Human-readable description */
   description?: string;
 }

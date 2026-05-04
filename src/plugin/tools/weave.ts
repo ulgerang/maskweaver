@@ -78,6 +78,8 @@ import {
     generatePoolAgentFilesFromConfig,
     writeDefaultRuntimeConfig,
     writeDefaultPluginConfig,
+    writeAutoDetectedConfig,
+    formatProviderChecklist,
 } from '../../shared/generate-agents.js';
 import { resolveCommand, loadCommandsJson, type CommandEntry } from './command-registry.js';
 
@@ -115,6 +117,8 @@ export function createWeaveTool() {
                 .describe('Force regenerate agent .md files from config pool (for agents command)'),
             init: z.boolean().optional()
                 .describe('Create default maskweaver.config.json with pool template (for agents command)'),
+            force: z.boolean().optional()
+                .describe('Force re-detect subscription and overwrite maskweaver.config.json (for agents command)'),
             docsPath: z.string().optional()
                 .describe('Path to requirements documents (for design command)'),
             phaseId: z.string().optional()
@@ -3166,14 +3170,25 @@ async function handleAgents(
     args: {
         sync?: boolean;
         init?: boolean;
+        force?: boolean;
     },
     basePath: string
 ): Promise<string> {
-    if (!args.sync && !args.init) {
-        return 'Error: agents requires an action. Use `sync=true` to regenerate agent files, or `init=true` to create default config.';
+    if (!args.sync && !args.init && !args.force) {
+        return 'Error: agents requires an action. Use `sync=true` to regenerate agent files, `init=true` to create default config, or `force=true` to re-detect subscription and overwrite config.';
     }
 
     const sections: string[] = [];
+    if (args.force) {
+        const result = writeAutoDetectedConfig(basePath, true);
+        if (result) {
+            sections.push(`## ✅ Config Force-Updated\n\nAuto-detected subscription: \`${result.detection.primary}\` (${result.detection.subscriptions.join(', ')})\n\n\`\`\`\n${formatProviderChecklist(result.detection)}\n\`\`\`\n\nWrote to: \`${toWorkspaceRelative(basePath, result.path)}\``);
+        } else {
+            sections.push('## ❌ Force update failed\n\nCould not auto-detect subscription. Make sure opencode CLI is available.');
+        }
+        // Also sync agents after force update
+        sections.push(await handleSyncAgents(basePath));
+    }
     if (args.sync) {
         sections.push(await handleSyncAgents(basePath));
     }

@@ -401,6 +401,7 @@ function buildZaiPool() {
             maxConcurrent: 1,
             capabilities: ['search', 'formatting', 'simple-coding', 'file-ops'],
             costTier: 'low',
+            priority: 1,
             description: 'GLM-5 Turbo - 빠름. 단순 검색/포매팅/파일작업',
         },
         {
@@ -410,6 +411,7 @@ function buildZaiPool() {
             maxConcurrent: 10,
             capabilities: ['coding', 'testing', 'refactoring', 'backend'],
             costTier: 'medium',
+            priority: 1,
             description: 'GLM-5.1 - 일반. 코딩/리팩토링/백엔드',
         },
         {
@@ -419,6 +421,7 @@ function buildZaiPool() {
             maxConcurrent: 10,
             capabilities: ['architecture', 'debugging', 'reasoning', 'complex-coding', 'refactoring'],
             costTier: 'high',
+            priority: 1,
             description: 'GLM-5.1 - 고급 추론. 아키텍처/복잡 디버깅',
         },
     ];
@@ -433,6 +436,7 @@ function buildOpencodeGoPool() {
             maxConcurrent: 5,
             capabilities: ['search', 'formatting', 'simple-coding', 'file-ops'],
             costTier: 'low',
+            priority: 1,
             description: 'DeepSeek V4 Flash - 빠름. 단순 검색/포매팅/파일작업',
         },
         {
@@ -442,6 +446,7 @@ function buildOpencodeGoPool() {
             maxConcurrent: 3,
             capabilities: ['coding', 'testing', 'refactoring', 'backend'],
             costTier: 'medium',
+            priority: 2,
             description: 'DeepSeek V4 Flash - 일반. 코딩/리팩토링/백엔드',
         },
         {
@@ -451,6 +456,7 @@ function buildOpencodeGoPool() {
             maxConcurrent: 3,
             capabilities: ['vision', 'frontend', 'testing'],
             costTier: 'medium',
+            priority: 1,
             description: 'Qwen 3.6 Plus - 비전. 이미지 분석/프론트엔드/테스트',
         },
         {
@@ -460,6 +466,7 @@ function buildOpencodeGoPool() {
             maxConcurrent: 2,
             capabilities: ['architecture', 'debugging', 'reasoning', 'complex-coding', 'refactoring'],
             costTier: 'high',
+            priority: 2,
             description: 'DeepSeek V4 Pro - 고급 추론. 아키텍처/복잡 디버깅',
         },
         {
@@ -469,6 +476,7 @@ function buildOpencodeGoPool() {
             maxConcurrent: 2,
             capabilities: ['vision', 'reasoning', 'complex-coding', 'architecture', 'debugging'],
             costTier: 'high',
+            priority: 1,
             description: 'Kimi K2.6 - 비전 고급. 이미지 분석/복잡 추론',
         },
     ];
@@ -547,7 +555,7 @@ export function formatProviderChecklist(detection: SubscriptionDetectionResult):
     return lines.join('\n');
 }
 
-export function writeAutoDetectedConfig(projectDir: string): { path: string; detection: SubscriptionDetectionResult } | null {
+export function writeAutoDetectedConfig(projectDir: string, force?: boolean): { path: string; detection: SubscriptionDetectionResult } | null {
     let detection: SubscriptionDetectionResult;
 
     try {
@@ -563,7 +571,7 @@ export function writeAutoDetectedConfig(projectDir: string): { path: string; det
         ? (() => { try { return JSON.parse(fs.readFileSync(targetPath, 'utf-8')); } catch { return null; } })()
         : null;
 
-    if (existingConfig?.dummyHumans?.pool?.length > 0) {
+    if (!force && existingConfig?.dummyHumans?.pool?.length > 0) {
         return null;
     }
 
@@ -597,6 +605,7 @@ export const DEFAULT_RUNTIME_CONFIG_TEMPLATE = {
         maxConcurrent: 5,
         capabilities: ['search', 'formatting', 'simple-coding', 'file-ops'],
         costTier: 'low',
+        priority: 1,
         description: 'DeepSeek V4 Flash - 빠름. 단순 검색/포매팅/파일작업',
       },
       {
@@ -606,6 +615,7 @@ export const DEFAULT_RUNTIME_CONFIG_TEMPLATE = {
         maxConcurrent: 3,
         capabilities: ['coding', 'testing', 'refactoring', 'backend'],
         costTier: 'medium',
+        priority: 2,
         description: 'DeepSeek V4 Flash - 일반. 코딩/리팩토링/백엔드',
       },
       {
@@ -615,6 +625,7 @@ export const DEFAULT_RUNTIME_CONFIG_TEMPLATE = {
         maxConcurrent: 3,
         capabilities: ['vision', 'frontend', 'testing'],
         costTier: 'medium',
+        priority: 1,
         description: 'Qwen 3.6 Plus - 비전. 이미지 분석/프론트엔드/테스트',
       },
       {
@@ -624,6 +635,7 @@ export const DEFAULT_RUNTIME_CONFIG_TEMPLATE = {
         maxConcurrent: 2,
         capabilities: ['architecture', 'debugging', 'reasoning', 'complex-coding', 'refactoring'],
         costTier: 'high',
+        priority: 2,
         description: 'DeepSeek V4 Pro - 고급 추론. 아키텍처/복잡 디버깅',
       },
       {
@@ -633,6 +645,7 @@ export const DEFAULT_RUNTIME_CONFIG_TEMPLATE = {
         maxConcurrent: 2,
         capabilities: ['vision', 'reasoning', 'complex-coding', 'architecture', 'debugging'],
         costTier: 'high',
+        priority: 1,
         description: 'Kimi K2.6 - 비전 고급. 이미지 분석/복잡 추론',
       },
     ],

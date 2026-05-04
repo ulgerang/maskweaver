@@ -359,13 +359,18 @@ export class ModelRegistry {
       if (slotA.available && !slotB.available) return -1;
       if (!slotA.available && slotB.available) return 1;
 
-      // 2. Cost ordering
+      // 2. Priority within tier (higher = preferred first, default 0)
+      const priA = a.priority ?? 0;
+      const priB = b.priority ?? 0;
+      if (priB !== priA) return priB - priA;
+
+      // 3. Cost ordering
       if (preferCheap) {
         const costDiff = COST_ORDER[a.costTier] - COST_ORDER[b.costTier];
         if (costDiff !== 0) return costDiff;
       }
 
-      // 3. More remaining slots = better
+      // 4. More remaining slots = better
       return slotB.remainingSlots - slotA.remainingSlots;
     });
   }

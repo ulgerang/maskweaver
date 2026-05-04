@@ -79,6 +79,13 @@ const REMOVED_WEAVE_COMMAND_FILES = [
   'weave-task.md',
   'weave-task-auto.md',
   'wave-task-auto.md',
+  'weave-approve-plan.md',
+  'weave-design.md',
+  'weave-flow.md',
+  'weave-plan.md',
+  'weave-research.md',
+  'weave-spec.md',
+  'weave-switch.md',
 ];
 
 function getAssetsDir(): string {

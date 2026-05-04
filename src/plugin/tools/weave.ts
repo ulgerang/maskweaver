@@ -28,10 +28,8 @@ import { archiveChange } from '../../weave/stages/archive.js';
 import { handoff, generateStatusReport, handleUserResponse } from '../../weave/stages/handoff.js';
 import { analyzeCodebase, runGraphifyAnalysis, readMapResult } from '../../weave/stages/map.js';
 import { interview as interviewStage, injectMapContext, loadInterviewState, listInterviewStates } from '../../weave/stages/intake.js';
-import { executeBuildLoop, generateBuildState, generateBuildId, loadBuildState } from '../../weave/stages/build.js';
+import { generateBuildId } from '../../weave/stages/build.js';
 import { generateOpenSpecArtifacts, ensureOpenSpecWorkspace } from '../../weave/stages/openspec.js';
-import { WeaveOrchestrator } from '../../weave/orchestrator.js';
-import { getBuildStateDir, getBuildStatePath, getMapReportPath } from '../../weave/change-artifacts.js';
 import { getPhaseManager } from '../../weave/phase-manager.js';
 import { recommendVerificationCommands, formatRecommendedCommandsAsBash } from '../../weave/verification/index.js';
 import {
@@ -46,6 +44,8 @@ import { ensureGitRepo, stageAllChanges, listStagedFiles, hasStagedChanges, comm
 import { scanFilesForSecrets, loadSecretScanConfig, shouldBlockOnFindings, formatSecretScanReport } from '../../weave/security/secret-scan.js';
 import { searchTroubleshooting, recordTroubleshooting, GlobalKnowledge } from '../../weave/knowledge/global.js';
 import { ensureChangeArtifact, readChangeMetadata, writeChangeVerificationReport } from '../../weave/change-artifacts.js';
+import { advanceBuildStep } from '../../weave/wave-executor.js';
+import * as CM from '../../weave/context-manager.js';
 import type { WeavePhase, WeavePlan, GherkinScenario } from '../../weave/types.js';
 import { analyzeParallelOpportunities, executionPlanToSquadTasks } from '../../weave/bridge.js';
 import {
@@ -187,6 +187,8 @@ export function createWeaveTool() {
                 .describe('Maximum retries per task (for build command)'),
             buildId: z.string().optional()
                 .describe('Build ID to resume (for build-resume command)'),
+            taskResults: z.string().optional()
+                .describe('JSON array of TaskResult from previous wave (for resume)'),
             phaseIds: z.string().optional()
                 .describe('Comma-separated phase IDs (for build command)'),
         },
@@ -231,6 +233,7 @@ export function createWeaveTool() {
                 deep?: boolean;
                 maxRetries?: number;
                 buildId?: string;
+                taskResults?: string;
                 phaseIds?: string;
             },
             context: { worktree: string }
@@ -275,7 +278,7 @@ export function createWeaveTool() {
                         break;
 
                     case 'craft':
-                        result = await handleCraft(args, basePath);
+                        result = '> ⚠️ `craft` is deprecated. Use `weave command=build` instead — it now auto-approves and runs the full build loop (craft + build + verify).\n\n' + await handleBuildUnified(args, basePath);
                         break;
 
                     case 'build':
@@ -2471,57 +2474,97 @@ async function handleBuild(
     basePath: string
 ): Promise<string> {
     const lines: string[] = [];
-    lines.push('## 🏗️ Build');
+    lines.push('## 🏗️ Build (Wave)');
     lines.push('');
 
     const manager = getPhaseManager(basePath);
     const plan = await manager.loadPlan();
     if (!plan) {
-        return 'Error: No active plan found. Run `weave command=design docsPath="docs/"` first.';
+        return 'Error: No active plan found. Run `weave command=prepare docsPath="docs/"` first.';
     }
 
     if (!plan.planApproved) {
-        return 'Error: Plan not approved. Run `weave command=approve` first.';
+        plan.planApproved = true;
+        plan.planApprovedAt = new Date().toISOString();
+        plan.planApprovalNotes = 'Auto-approved by build command.';
+        await manager.savePlan(plan);
+        lines.push(`> ⚡ Plan auto-approved: **${plan.projectName}**`);
+        lines.push('');
     }
+
+    const changeId = plan.activeChangeId || plan.planName || 'main';
+    const buildId = generateBuildId();
 
     lines.push(`Plan: **${plan.projectName}** (approved at ${plan.planApprovedAt || 'N/A'})`);
+    lines.push(`Build: \`${buildId}\``);
     lines.push('');
 
-    const orchestrator = new WeaveOrchestrator();
-    const buildId = generateBuildId();
-    const state = generateBuildState(buildId, plan.planName || plan.projectName, args.maxRetries || 3);
+    try {
+        const decision = await advanceBuildStep({
+            plan,
+            basePath,
+            buildId,
+            changeId,
+            maxRetries: args.maxRetries || 3,
+            phaseIds: args.phaseIds ? args.phaseIds.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+        });
 
-    const onMessages: string[] = [];
+        switch (decision.kind) {
+            case 'dispatch_wave': {
+                lines.push(`### Wave ${decision.wave.waveIndex} — ${decision.contracts.length} task(s)`);
+                lines.push(`Parallel-safe: ${decision.wave.parallelSafe ? '✅ Yes' : '⚠️ No (sequential)'}`);
+                lines.push('');
+                
+                for (const contract of decision.contracts) {
+                    lines.push(`#### ${contract.taskId} — \`${contract.subagentType}\`${contract.mask ? ` (${contract.mask})` : ''}`);
+                    lines.push(`- Allowed: ${contract.allowedPaths.length > 0 ? contract.allowedPaths.join(', ') : '*'}`);
+                    lines.push(`- Verify: ${contract.verifyCommands.join('; ') || 'none'}`);
+                    lines.push(`- Brief: \`${contract.briefPath}\``);
+                    lines.push(`- Context: \`${contract.contextPath}\``);
+                    lines.push('');
+                    lines.push('```');
+                    lines.push(`Task(${contract.subagentType}, prompt=Read ${contract.briefPath} and execute the task.)`);
+                    lines.push('```');
+                    lines.push('');
+                }
 
-    lines.push('Starting autonomous build loop...');
-    lines.push('');
-
-    const result = await executeBuildLoop({
-        plan,
-        state,
-        orchestrator,
-        basePath,
-        maxRetries: args.maxRetries,
-        phaseIds: args.phaseIds ? args.phaseIds.split(',').map((id: string) => id.trim()).filter(Boolean) : undefined,
-        onMessage: (msg: string) => { onMessages.push(msg); },
-    });
-
-    for (const msg of onMessages) {
-        lines.push(msg);
-    }
-
-    lines.push('');
-    if (result.success) {
-        lines.push('## ✅ Build Complete');
-    } else {
-        lines.push('## ⚠️ Build Blocked');
-    }
-    lines.push('');
-    lines.push(result.summary);
-
-    if (result.tasksEscalated > 0 || result.tasksFailed > 0) {
-        lines.push('');
-        lines.push('To resume after fixing issues: `weave command=build-resume buildId="<buildId>"`');
+                lines.push('---');
+                lines.push(`After Task() calls complete, pass results:`);
+                lines.push('```');
+                lines.push(`weave command=build action=resume buildId="${buildId}" taskResults='[{"taskId":"<id>","phaseId":"<pid>","status":"succeeded","changedFiles":["file.ts"],"createdSymbols":[],"downstreamExports":[]}]'`);
+                lines.push('```');
+                break;
+            }
+            case 'verify': {
+                lines.push(`### Verifying Wave ${decision.waveIndex}`);
+                lines.push('Running verification commands...');
+                break;
+            }
+            case 'repair': {
+                lines.push(`### 🔧 Repair: ${decision.contract.taskId}`);
+                lines.push(`Failure: ${decision.failureKind}`);
+                lines.push('');
+                lines.push('```');
+                lines.push(`Task(${decision.contract.subagentType}, prompt=Read ${decision.contract.briefPath} and fix the issues.)`);
+                lines.push('```');
+                break;
+            }
+            case 'blocked': {
+                lines.push(`### ⛔ Blocked`);
+                lines.push(decision.reason);
+                if (decision.failedTasks.length > 0) {
+                    lines.push(`Failed tasks: ${decision.failedTasks.join(', ')}`);
+                }
+                break;
+            }
+            case 'complete': {
+                lines.push('### ✅ Build Complete');
+                lines.push(decision.summary);
+                break;
+            }
+        }
+    } catch (e) {
+        lines.push(`❌ Error: ${e instanceof Error ? e.message : String(e)}`);
     }
 
     return lines.join('\n');
@@ -2535,6 +2578,7 @@ async function handleBuildResume(
     args: {
         buildId?: string;
         maxRetries?: number;
+        taskResults?: string;
     },
     basePath: string
 ): Promise<string> {
@@ -2543,16 +2587,7 @@ async function handleBuildResume(
     lines.push('');
 
     if (!args.buildId) {
-        return 'Error: buildId is required. Use `weave command=build-resume buildId="<id>"`.';
-    }
-
-    const state = await loadBuildState(basePath, args.buildId);
-    if (!state) {
-        return `Error: Build state not found: ${args.buildId}`;
-    }
-
-    if (state.status !== 'blocked') {
-        return `Build ${args.buildId} is not blocked (status: ${state.status}). No need to resume.`;
+        return 'Error: buildId is required. Use `weave command=build action=resume buildId="<id>"`.';
     }
 
     const manager = getPhaseManager(basePath);
@@ -2561,20 +2596,80 @@ async function handleBuildResume(
         return 'Error: No active plan found.';
     }
 
-    state.status = 'running';
-    state.escalationReason = undefined;
+    const changeId = plan.activeChangeId || plan.planName || 'main';
 
-    const orchestrator = new WeaveOrchestrator();
+    let lastResults: import('../../weave/types.js').TaskResult[] = [];
+    if (args.taskResults) {
+        try {
+            lastResults = JSON.parse(args.taskResults);
+        } catch {
+            lines.push('> ⚠️ Could not parse taskResults, proceeding without previous results.');
+        }
+    } else {
+        lines.push('> ⚠️ No taskResults provided. Pass results from Task() calls as JSON:');
+        lines.push('> `weave command=build action=resume buildId="..." taskResults=\'[{"taskId":"...","phaseId":"...","status":"succeeded","changedFiles":[],"createdSymbols":[],"downstreamExports":[]}]\'`');
+        lines.push('');
+    }
 
-    const result = await executeBuildLoop({
-        plan,
-        state,
-        orchestrator,
-        basePath,
-        maxRetries: args.maxRetries || 3,
-    });
+    try {
+        const decision = await advanceBuildStep({
+            plan,
+            basePath,
+            buildId: args.buildId,
+            changeId,
+            lastResults: lastResults.length > 0 ? lastResults : undefined,
+            maxRetries: args.maxRetries || 3,
+        });
 
-    lines.push(result.summary);
+        switch (decision.kind) {
+            case 'dispatch_wave': {
+                lines.push(`### Next Wave ${decision.wave.waveIndex} — ${decision.contracts.length} task(s)`);
+                lines.push(`Parallel-safe: ${decision.wave.parallelSafe ? '✅ Yes' : '⚠️ No'}`);
+                lines.push('');
+                for (const contract of decision.contracts) {
+                    lines.push(`#### ${contract.taskId} — \`${contract.subagentType}\``);
+                    lines.push('```');
+                    lines.push(`Task(${contract.subagentType}, prompt=Read ${contract.briefPath} and execute the task.)`);
+                    lines.push('```');
+                    lines.push('');
+                }
+                lines.push(`After Task() calls complete, pass results:`);
+                lines.push('```');
+                lines.push(`weave command=build action=resume buildId="${args.buildId}" taskResults='[{"taskId":"<id>","phaseId":"<pid>","status":"succeeded","changedFiles":["file.ts"],"createdSymbols":[],"downstreamExports":[]}]'`);
+                lines.push('```');
+                break;
+            }
+            case 'repair': {
+                lines.push(`### 🔧 Repair: ${decision.contract.taskId}`);
+                lines.push(`Failure: ${decision.failureKind}`);
+                lines.push('```');
+                lines.push(`Task(${decision.contract.subagentType}, prompt=Read ${decision.contract.briefPath} and fix.)`);
+                lines.push('```');
+                lines.push('');
+                lines.push(`After fix, pass results:`);
+                lines.push('```');
+                lines.push(`weave command=build action=resume buildId="${args.buildId}" taskResults='[{"taskId":"${decision.contract.taskId}","phaseId":"${decision.contract.phaseId}","status":"succeeded","changedFiles":[],"createdSymbols":[],"downstreamExports":[]}]'`);
+                lines.push('```');
+                break;
+            }
+            case 'blocked': {
+                lines.push('### ⛔ Build Blocked');
+                lines.push(decision.reason);
+                break;
+            }
+            case 'complete': {
+                lines.push('### ✅ Build Complete');
+                lines.push(decision.summary);
+                break;
+            }
+            case 'verify': {
+                lines.push(`### Verifying Wave ${decision.waveIndex}...`);
+                break;
+            }
+        }
+    } catch (e) {
+        lines.push(`❌ Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
 
     return lines.join('\n');
 }
@@ -3115,6 +3210,67 @@ async function handleInitConfig(basePath: string): Promise<string> {
 }
 
 // ============================================================================
+// Wave Build Status
+// ============================================================================
+
+async function handleWaveBuildStatus(buildId: string, basePath: string): Promise<string | null> {
+    const manager = getPhaseManager(basePath);
+    const plan = await manager.loadPlan();
+    if (!plan) return null;
+
+    const changeId = plan.activeChangeId || plan.planName || 'main';
+    const buildDir = path.join(basePath, 'changes', changeId, 'builds', buildId);
+    if (!fs.existsSync(buildDir)) return null;
+
+    const lines: string[] = [];
+    lines.push(`## Wave Build Status: \`${buildId}\``);
+    lines.push('');
+
+    const wavesDir = path.join(buildDir, 'waves');
+    if (fs.existsSync(wavesDir)) {
+        const waveFiles = fs.readdirSync(wavesDir).filter(f => f.startsWith('wave-')).sort();
+        for (const wf of waveFiles) {
+            const content = fs.readFileSync(path.join(wavesDir, wf), 'utf-8');
+            lines.push(`### ${wf.replace('.md', '')}`);
+            lines.push('```');
+            lines.push(content.slice(0, 2000));
+            lines.push('```');
+            lines.push('');
+        }
+    }
+
+    const tasksDir = path.join(buildDir, 'tasks');
+    if (fs.existsSync(tasksDir)) {
+        const taskDirs = fs.readdirSync(tasksDir, { withFileTypes: true }).filter(d => d.isDirectory());
+        lines.push(`### Tasks (${taskDirs.length})`);
+        lines.push('');
+        for (const td of taskDirs) {
+            const resultPath = path.join(tasksDir, td.name, 'result.md');
+            const briefPath = path.join(tasksDir, td.name, 'brief.md');
+            if (fs.existsSync(resultPath)) {
+                const resultContent = fs.readFileSync(resultPath, 'utf-8');
+                const statusMatch = resultContent.match(/\*\*Status:\*\*\s*(\w+)/);
+                lines.push(`- ${td.name}: ${statusMatch?.[1] || 'unknown'}`);
+            } else if (fs.existsSync(briefPath)) {
+                lines.push(`- ${td.name}: dispatched (no result yet)`);
+            }
+        }
+        lines.push('');
+    }
+
+    const contextIndexPath = path.join(buildDir, 'context-index.yaml');
+    if (fs.existsSync(contextIndexPath)) {
+        lines.push('### Context Index');
+        lines.push('```yaml');
+        lines.push(fs.readFileSync(contextIndexPath, 'utf-8').slice(0, 1500));
+        lines.push('```');
+        lines.push('');
+    }
+
+    return lines.join('\n');
+}
+
+// ============================================================================
 // Unified Build Handler (absorbs build, build-resume, loop-*)
 // ============================================================================
 
@@ -3131,6 +3287,7 @@ async function handleBuildUnified(
         maxNoProgress?: number;
         pollIntervalMs?: number;
         pollCycles?: number;
+        taskResults?: string;
     },
     basePath: string
 ): Promise<string> {
@@ -3142,12 +3299,14 @@ async function handleBuildUnified(
             return handleBuildResume(args, basePath);
         case 'status': {
             const loopId = args.buildId || args.loopId;
-            if (!loopId) return 'Error: buildId or loopId is required for status action. Example: weave command=build action=status buildId="build-20250428-a1b2"';
+            if (!loopId) return 'Error: buildId is required. Example: weave command=build action=status buildId="build-20250428-a1b2"';
+            const waveStatus = await handleWaveBuildStatus(loopId, basePath);
+            if (waveStatus) return waveStatus;
             return handleLoopStatus({ loopId }, basePath);
         }
         case 'stop': {
             const loopId = args.buildId || args.loopId;
-            if (!loopId) return 'Error: buildId or loopId is required for stop action. Example: weave command=build action=stop buildId="build-20250428-a1b2"';
+            if (!loopId) return 'Error: buildId is required. Example: weave command=build action=stop buildId="build-20250428-a1b2"';
             return handleLoopStop({ loopId, context: undefined }, basePath);
         }
         case 'list':

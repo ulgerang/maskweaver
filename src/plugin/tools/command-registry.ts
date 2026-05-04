@@ -140,7 +140,7 @@ const INLINE_DEFAULT: CommandsJson = {
             name: 'craft',
             aliases: [],
             deprecatedAliases: [],
-            description: 'Prepare execution context for a phase (phase auto-select if omitted)',
+            description: '[DEPRECATED] Use build instead — it now auto-approves and runs craft+build+verify',
             category: 'execution',
             args: [
                 { name: 'phaseId', type: 'string', required: false, description: 'Phase ID (auto-select if omitted)' },
@@ -148,7 +148,7 @@ const INLINE_DEFAULT: CommandsJson = {
             ],
             mdFile: 'weave-craft.md',
             handler: 'handleCraft',
-            examples: ['weave command=craft', 'weave command=craft phaseId="P1"'],
+            examples: ['weave command=build (use this instead)'],
         },
         {
             name: 'build',
@@ -161,6 +161,7 @@ const INLINE_DEFAULT: CommandsJson = {
                 { name: 'phaseIds', type: 'string', required: false, description: 'Comma-separated phase IDs for run action' },
                 { name: 'buildId', type: 'string', required: false, description: 'Build ID for status/stop/resume/sync actions' },
                 { name: 'maxRetries', type: 'number', default: 3, min: 1, max: 10, description: 'Maximum retries per task (for run action)' },
+                { name: 'taskResults', type: 'string', required: false, description: 'JSON array of TaskResult from previous wave (for resume)' },
                 { name: 'maxIterations', type: 'number', default: 1, min: 1, max: 20, description: 'Maximum loop iterations before blocking' },
                 { name: 'maxNoProgress', type: 'number', default: 1, min: 0, max: 10, description: 'Maximum repeated no-progress failures before blocking' },
             ],

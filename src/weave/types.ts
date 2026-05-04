@@ -427,6 +427,101 @@ export interface EnvironmentAnalysis {
 }
 
 // ============================================================================
+// Build Wave & Wiki Context Types (Adaptive Wave Batching)
+// ============================================================================
+
+export type WaveTaskStatus = 'pending' | 'dispatched' | 'succeeded' | 'failed' | 'blocked' | 'verified';
+
+export type FailureKind =
+    | 'prompt_failure'
+    | 'implementation_failure'
+    | 'validation_failure'
+    | 'conflict_failure'
+    | 'dependency_failure'
+    | 'environment_failure';
+
+export interface WavePlan {
+    waveIndex: number;
+    tasks: WaveTaskEntry[];
+    parallelSafe: boolean;
+    wikiSnapshotDir?: string;
+    startedAt?: string;
+    completedAt?: string;
+}
+
+export interface WaveTaskEntry {
+    taskId: string;
+    phaseId: string;
+    status: WaveTaskStatus;
+    agentTier: AgentTier;
+    mask: string | null;
+    allowedPaths: string[];
+    forbiddenPaths: string[];
+    dependsOn: string[];
+}
+
+export interface TaskDelegationContract {
+    buildId: string;
+    phaseId: string;
+    taskId: string;
+    waveIndex: number;
+    subagentType: string;
+    mask: string | null;
+    prompt: string;
+    briefPath: string;
+    contextPath: string;
+    allowedPaths: string[];
+    forbiddenPaths: string[];
+    verifyCommands: string[];
+    resumeCommand: string;
+}
+
+export interface TaskResult {
+    taskId: string;
+    phaseId: string;
+    status: 'succeeded' | 'failed';
+    changedFiles: string[];
+    createdSymbols: string[];
+    errorSummary?: string;
+    failureKind?: FailureKind;
+    downstreamExports: Array<{
+        kind: string;
+        path: string;
+        summary: string;
+    }>;
+}
+
+export interface WaveDelta {
+    waveIndex: number;
+    completed: string[];
+    failed: string[];
+    changedFiles: string[];
+    newSymbols: string[];
+    downstreamExports: Array<{ kind: string; path: string; summary: string }>;
+}
+
+export interface ContextIndex {
+    buildId: string;
+    lastWaveIndex: number;
+    tasks: Record<string, {
+        context: string[];
+        upstream: Array<{
+            taskId: string;
+            result: string;
+            verified: boolean;
+            exports: string[];
+        }>;
+    }>;
+}
+
+export type BuildDecision =
+    | { kind: 'dispatch_wave'; wave: WavePlan; contracts: TaskDelegationContract[] }
+    | { kind: 'verify'; waveIndex: number }
+    | { kind: 'repair'; contract: TaskDelegationContract; failureKind: FailureKind }
+    | { kind: 'blocked'; reason: string; failedTasks: string[] }
+    | { kind: 'complete'; summary: string };
+
+// ============================================================================
 // Events
 // ============================================================================
 

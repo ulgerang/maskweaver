@@ -845,8 +845,82 @@ interface PluginState {
 let state: PluginState | null = null;
 
 // ============================================================================
+// Package Cache Version Check
+// ============================================================================
+
+const OPENCODE_PACKAGES_DIR = path.join(os.homedir(), '.cache', 'opencode', 'packages');
+const MASKWEAVER_PACKAGE_GLOB = 'maskweaver@*';
+
+function getCacheVersion(): { version: string; pkgDir: string } | null {
+  if (!fs.existsSync(OPENCODE_PACKAGES_DIR)) return null;
+
+  const entries = fs.readdirSync(OPENCODE_PACKAGES_DIR);
+  for (const entry of entries) {
+    if (!entry.startsWith('maskweaver@')) continue;
+    const pkgDir = path.join(OPENCODE_PACKAGES_DIR, entry, 'node_modules', 'maskweaver');
+    const pkgJsonPath = path.join(pkgDir, 'package.json');
+    if (!fs.existsSync(pkgJsonPath)) continue;
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'));
+      return { version: pkg.version, pkgDir: path.join(OPENCODE_PACKAGES_DIR, entry) };
+    } catch { continue; }
+  }
+
+  return null;
+}
+
+function getLatestNpmVersion(): string | null {
+  try {
+    const result = spawnSync('npm', ['view', 'maskweaver', 'version'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 10000,
+      windowsHide: true,
+    });
+    if (result.status === 0 && result.stdout) {
+      return result.stdout.trim();
+    }
+  } catch { }
+  return null;
+}
+
+function checkAndInvalidateCache(): { invalidated: boolean; cachedVersion: string | null; latestVersion: string | null } {
+  const cached = getCacheVersion();
+  if (!cached) {
+    return { invalidated: false, cachedVersion: null, latestVersion: null };
+  }
+
+  if (cached.version === VERSION) {
+    return { invalidated: false, cachedVersion: cached.version, latestVersion: null };
+  }
+
+  const latest = getLatestNpmVersion();
+
+  if (latest && latest !== cached.version) {
+    try {
+      fs.rmSync(cached.pkgDir, { recursive: true, force: true });
+      return { invalidated: true, cachedVersion: cached.version, latestVersion: latest };
+    } catch {
+      return { invalidated: false, cachedVersion: cached.version, latestVersion: latest };
+    }
+  }
+
+  return { invalidated: false, cachedVersion: cached.version, latestVersion: latest };
+}
+
+// ============================================================================
 
 export const MaskweaverPlugin: Plugin = async ({ client, directory, project, worktree, $, serverUrl }) => {
+  // ==========================================================================
+  // 0. Check package cache version and invalidate if stale
+  // ==========================================================================
+  const cacheCheck = checkAndInvalidateCache();
+  if (cacheCheck.invalidated) {
+    pluginLog(client, 'warn', `Stale plugin cache detected (v${cacheCheck.cachedVersion}). Cleared — v${cacheCheck.latestVersion} will install on next restart.`);
+    pluginLog(client, 'warn', `Please restart OpenCode to activate maskweaver v${VERSION}.`);
+  } else if (cacheCheck.cachedVersion && cacheCheck.cachedVersion !== VERSION) {
+    pluginLog(client, 'info', `Plugin cache v${cacheCheck.cachedVersion} — current is v${VERSION}. Restart recommended.`);
+  }
   // ==========================================================================
   // 1. Load Configuration (oh-my-opencode pattern)
   // ==========================================================================

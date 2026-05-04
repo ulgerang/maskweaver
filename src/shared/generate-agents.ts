@@ -196,6 +196,388 @@ export function generatePoolAgentFilesFromConfig(
 }
 
 // ============================================================================
+// Subscription Detection & Auto-Config
+// ============================================================================
+
+import { spawnSync } from 'node:child_process';
+
+export type DetectedSubscription = 'opencode-go' | 'zai-coding-plan';
+
+export interface SubscriptionDetectionResult {
+    subscriptions: DetectedSubscription[];
+    primary: DetectedSubscription;
+    evidence: string[];
+    allProviders: ProviderInfo[];
+}
+
+export interface ProviderInfo {
+    name: string;
+    subscription: DetectedSubscription | null;
+    authType: string;
+    active: boolean;
+}
+
+function readOpencodeConfig(basePath: string): Record<string, any> | null {
+    const candidates = [
+        path.join(basePath, 'opencode.json'),
+        path.join(basePath, 'opencode.jsonc'),
+        path.join(os.homedir(), '.config', 'opencode', 'opencode.json'),
+        path.join(os.homedir(), '.config', 'opencode', 'opencode.jsonc'),
+    ];
+
+    for (const candidate of candidates) {
+        if (!fs.existsSync(candidate)) continue;
+        try {
+            let content = fs.readFileSync(candidate, 'utf-8');
+            content = content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+            const parsed = JSON.parse(content);
+            if (parsed && typeof parsed === 'object') return parsed;
+        } catch { continue; }
+    }
+
+    return null;
+}
+
+function runCli(command: string, args: string[]): string | null {
+    try {
+        const result = spawnSync(command, args, {
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+            timeout: 8000,
+            windowsHide: true,
+        });
+        if (result.error || result.status !== 0) return null;
+        return result.stdout || null;
+    } catch {
+        return null;
+    }
+}
+
+const PROVIDER_MAP: Record<string, DetectedSubscription> = {
+    'opencode go': 'opencode-go',
+    'opencode-go': 'opencode-go',
+    'z.ai coding plan': 'zai-coding-plan',
+    'zai-coding-plan': 'zai-coding-plan',
+    'z.ai': 'zai-coding-plan',
+};
+
+function parseProvidersList(output: string): ProviderInfo[] {
+    const providers: ProviderInfo[] = [];
+    const lines = output.split('\n');
+
+    for (const line of lines) {
+        const stripped = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
+        if (!stripped || stripped.startsWith('┌') || stripped.startsWith('└') || stripped.startsWith('│') || stripped.includes('credentials') || stripped.includes('environment')) continue;
+
+        const match = stripped.match(/[●○◉◘]\s+(.+?)\s+(api|oauth|env)$/i);
+        if (match) {
+            const name = match[1].trim();
+            const authType = match[2].trim();
+
+            let subscription: DetectedSubscription | null = null;
+            const nameLower = name.toLowerCase();
+            for (const [key, sub] of Object.entries(PROVIDER_MAP)) {
+                if (nameLower.includes(key)) {
+                    subscription = sub;
+                    break;
+                }
+            }
+
+            providers.push({
+                name,
+                subscription,
+                authType,
+                active: stripped.includes('●'),
+            });
+        }
+    }
+
+    return providers;
+}
+
+function detectFromModels(output: string): DetectedSubscription[] {
+    const subs = new Set<DetectedSubscription>();
+    for (const line of output.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('opencode-go/')) subs.add('opencode-go');
+        if (trimmed.startsWith('zai-coding-plan/')) subs.add('zai-coding-plan');
+    }
+    return Array.from(subs);
+}
+
+export function detectSubscriptionsFromCli(): SubscriptionDetectionResult {
+    const evidence: string[] = [];
+    const allProviders: ProviderInfo[] = [];
+    const subs = new Set<DetectedSubscription>();
+
+    const providersOutput = runCli('opencode', ['providers', 'list']);
+    if (providersOutput) {
+        const providers = parseProvidersList(providersOutput);
+        allProviders.push(...providers);
+
+        for (const p of providers) {
+            if (p.subscription) {
+                subs.add(p.subscription);
+                evidence.push(`provider: ${p.name} (${p.authType})`);
+            }
+        }
+    }
+
+    const modelsOutput = runCli('opencode', ['models']);
+    if (modelsOutput) {
+        const modelSubs = detectFromModels(modelsOutput);
+        for (const sub of modelSubs) {
+            if (!subs.has(sub)) {
+                subs.add(sub);
+                evidence.push(`models: ${sub}/* models available`);
+            }
+        }
+    }
+
+    if (subs.size === 0) {
+        subs.add('opencode-go');
+        evidence.push('No subscription detected via CLI, defaulting to opencode-go');
+    }
+
+    const primary = subs.has('zai-coding-plan') ? 'zai-coding-plan' : 'opencode-go';
+
+    return {
+        subscriptions: Array.from(subs),
+        primary,
+        evidence,
+        allProviders,
+    };
+}
+
+export function detectSubscriptionsFromConfig(opencodeConfig: Record<string, any>): SubscriptionDetectionResult {
+    const subs = new Set<DetectedSubscription>();
+    const evidence: string[] = [];
+
+    const modelFields = ['model', 'small_model', 'large_model'];
+    const configs = [opencodeConfig];
+
+    if (opencodeConfig.agent) {
+        for (const agentConfig of Object.values(opencodeConfig.agent) as any[]) {
+            if (agentConfig && typeof agentConfig === 'object') configs.push(agentConfig);
+        }
+    }
+
+    for (const cfg of configs) {
+        for (const field of modelFields) {
+            const val = cfg[field];
+            if (typeof val !== 'string' || !val) continue;
+
+            if (val.startsWith('opencode-go/')) {
+                subs.add('opencode-go');
+                evidence.push(`${field}: ${val}`);
+            } else if (val.startsWith('zai-coding-plan/')) {
+                subs.add('zai-coding-plan');
+                evidence.push(`${field}: ${val}`);
+            }
+        }
+    }
+
+    if (subs.size === 0) {
+        subs.add('opencode-go');
+        evidence.push('No provider detected in config, defaulting to opencode-go');
+    }
+
+    const primary = subs.has('zai-coding-plan') ? 'zai-coding-plan' : 'opencode-go';
+
+    return {
+        subscriptions: Array.from(subs),
+        primary,
+        evidence,
+        allProviders: [],
+    };
+}
+
+function buildZaiPool() {
+    return [
+        {
+            id: 'glm-flash',
+            model: 'zai-coding-plan/glm-5-turbo',
+            tier: 'flash',
+            maxConcurrent: 1,
+            capabilities: ['search', 'formatting', 'simple-coding', 'file-ops'],
+            costTier: 'low',
+            description: 'GLM-5 Turbo - 빠름. 단순 검색/포매팅/파일작업',
+        },
+        {
+            id: 'glm-general',
+            model: 'zai-coding-plan/glm-5.1',
+            tier: 'human',
+            maxConcurrent: 10,
+            capabilities: ['coding', 'testing', 'refactoring', 'backend'],
+            costTier: 'medium',
+            description: 'GLM-5.1 - 일반. 코딩/리팩토링/백엔드',
+        },
+        {
+            id: 'glm-premium',
+            model: 'zai-coding-plan/glm-5.1',
+            tier: 'premium',
+            maxConcurrent: 10,
+            capabilities: ['architecture', 'debugging', 'reasoning', 'complex-coding', 'refactoring'],
+            costTier: 'high',
+            description: 'GLM-5.1 - 고급 추론. 아키텍처/복잡 디버깅',
+        },
+    ];
+}
+
+function buildOpencodeGoPool() {
+    return [
+        {
+            id: 'deepseek-flash',
+            model: 'opencode-go/deepseek-v4-flash',
+            tier: 'flash',
+            maxConcurrent: 5,
+            capabilities: ['search', 'formatting', 'simple-coding', 'file-ops'],
+            costTier: 'low',
+            description: 'DeepSeek V4 Flash - 빠름. 단순 검색/포매팅/파일작업',
+        },
+        {
+            id: 'deepseek-general',
+            model: 'opencode-go/deepseek-v4-flash',
+            tier: 'human',
+            maxConcurrent: 3,
+            capabilities: ['coding', 'testing', 'refactoring', 'backend'],
+            costTier: 'medium',
+            description: 'DeepSeek V4 Flash - 일반. 코딩/리팩토링/백엔드',
+        },
+        {
+            id: 'qwen-vision',
+            model: 'opencode-go/qwen3.6-plus',
+            tier: 'human',
+            maxConcurrent: 3,
+            capabilities: ['vision', 'frontend', 'testing'],
+            costTier: 'medium',
+            description: 'Qwen 3.6 Plus - 비전. 이미지 분석/프론트엔드/테스트',
+        },
+        {
+            id: 'deepseek-pro',
+            model: 'opencode-go/deepseek-v4-pro',
+            tier: 'premium',
+            maxConcurrent: 2,
+            capabilities: ['architecture', 'debugging', 'reasoning', 'complex-coding', 'refactoring'],
+            costTier: 'high',
+            description: 'DeepSeek V4 Pro - 고급 추론. 아키텍처/복잡 디버깅',
+        },
+        {
+            id: 'kimi-vision',
+            model: 'opencode-go/kimi-k2.6',
+            tier: 'premium',
+            maxConcurrent: 2,
+            capabilities: ['vision', 'reasoning', 'complex-coding', 'architecture', 'debugging'],
+            costTier: 'high',
+            description: 'Kimi K2.6 - 비전 고급. 이미지 분석/복잡 추론',
+        },
+    ];
+}
+
+function buildOperatorModel(primary: DetectedSubscription): { model: string; maxConcurrent: number; description: string } {
+    switch (primary) {
+        case 'zai-coding-plan':
+            return {
+                model: 'zai-coding-plan/glm-5.1',
+                maxConcurrent: 10,
+                description: 'Squad Operator model - 작업 오케스트레이션 및 고급 추론',
+            };
+        default:
+            return {
+                model: 'opencode-go/deepseek-v4-pro',
+                maxConcurrent: 2,
+                description: 'Squad Operator model - 작업 오케스트레이션 및 고급 추론',
+            };
+    }
+}
+
+export function buildPoolFromDetection(detection: SubscriptionDetectionResult): any[] {
+    const pool: any[] = [];
+
+    if (detection.subscriptions.includes('opencode-go')) {
+        pool.push(...buildOpencodeGoPool());
+    }
+    if (detection.subscriptions.includes('zai-coding-plan')) {
+        pool.push(...buildZaiPool());
+    }
+
+    if (pool.length === 0) {
+        pool.push(...buildOpencodeGoPool());
+    }
+
+    return pool;
+}
+
+export function buildConfigFromDetection(detection: SubscriptionDetectionResult): Record<string, any> {
+    const pool = buildPoolFromDetection(detection);
+    const operator = buildOperatorModel(detection.primary);
+
+    return {
+        dummyHumans: { pool },
+        operator,
+        memory: { provider: 'text-only', enabled: false },
+        gdc: { enabled: 'auto', strictVerify: false, autoSyncOnPrepare: true },
+        language: 'ko',
+    };
+}
+
+export function formatProviderChecklist(detection: SubscriptionDetectionResult): string {
+    const lines: string[] = ['감지된 프로바이더:'];
+    lines.push('');
+
+    if (detection.allProviders.length > 0) {
+        for (const p of detection.allProviders) {
+            const marker = p.subscription && detection.subscriptions.includes(p.subscription) ? '[x]' : '[ ]';
+            const sub = p.subscription ? ` → ${p.subscription}` : '';
+            lines.push(`  ${marker} ${p.name} (${p.authType})${sub}`);
+        }
+    } else {
+        for (const sub of detection.subscriptions) {
+            lines.push(`  [x] ${sub}`);
+        }
+        lines.push(`  [ ] (다른 구독이 있다면 maskweaver.config.json에서 추가하세요)`);
+    }
+
+    lines.push('');
+    lines.push(`선택된 구독: ${detection.subscriptions.join(', ')}`);
+    lines.push(`기본 구독: ${detection.primary}`);
+    lines.push('');
+    lines.push('구독을 변경하려면 maskweaver.config.json의 dummyHumans.pool을 편집하세요.');
+
+    return lines.join('\n');
+}
+
+export function writeAutoDetectedConfig(projectDir: string): { path: string; detection: SubscriptionDetectionResult } | null {
+    let detection: SubscriptionDetectionResult;
+
+    try {
+        detection = detectSubscriptionsFromCli();
+    } catch {
+        const opencodeConfig = readOpencodeConfig(projectDir);
+        if (!opencodeConfig) return null;
+        detection = detectSubscriptionsFromConfig(opencodeConfig);
+    }
+
+    const targetPath = path.join(projectDir, 'maskweaver.config.json');
+    const existingConfig = fs.existsSync(targetPath)
+        ? (() => { try { return JSON.parse(fs.readFileSync(targetPath, 'utf-8')); } catch { return null; } })()
+        : null;
+
+    if (existingConfig?.dummyHumans?.pool?.length > 0) {
+        return null;
+    }
+
+    const newConfig = buildConfigFromDetection(detection);
+
+    try {
+        fs.writeFileSync(targetPath, JSON.stringify(newConfig, null, 2) + '\n', 'utf-8');
+        return { path: targetPath, detection };
+    } catch {
+        return null;
+    }
+}
+
+// ============================================================================
 // Default Config File Creator
 // ============================================================================
 
@@ -301,7 +683,12 @@ export function writeDefaultRuntimeConfig(projectDir: string): string | null {
   const targetPath = path.join(projectDir, 'maskweaver.config.json');
 
   if (fs.existsSync(targetPath)) {
-    return null; // Already exists, don't overwrite
+    return null;
+  }
+
+  const autoResult = writeAutoDetectedConfig(projectDir);
+  if (autoResult) {
+    return autoResult.path;
   }
 
   try {

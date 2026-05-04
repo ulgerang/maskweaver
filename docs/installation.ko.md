@@ -46,8 +46,41 @@ OpenCode가 시작할 때 `~/.cache/opencode/node_modules/`에 자동으로 플�
 1. `~/.cache/opencode/node_modules/`에 패키지가 있는지 확인
 2. 없으면 npm에서 자동으로 `bun install` 실행
 3. 플러그인 자동 로드
+4. **구독 자동 감지** — `opencode.json`의 `model` 필드에서 모델 프로바이더를 감지하여 `maskweaver.config.json`을 자동 생성합니다
 
 **직접 설치 명령어를 실행할 필요가 없습니다!**
+
+### 구독 자동 감지 (Zero Config)
+
+Maskweaver는 `opencode.json`의 `model` 필드를 읽어 사용 중인 모델 프로바이더를 자동 감지합니다:
+
+| 감지된 모델 접두어 | 자동 생성되는 에이전트 풀 |
+|---|---|
+| `opencode-go/` | DeepSeek V4 Flash/Pro, Qwen 3.6 Plus, Kimi K2.6 |
+| `zai-coding-plan/` | GLM-5 Turbo, GLM-5.1 |
+| 둘 다 또는 감지 안됨 | opencode-go 풀 (기본값) |
+
+**예시 — opencode-go 구독:**
+```jsonc
+// opencode.json
+{
+  "model": "opencode-go/deepseek-v4-flash",  // ← 이걸로 opencode-go 감지
+  "plugin": ["maskweaver/plugin"]
+}
+```
+→ DeepSeek/Qwen/Kimi 에이전트가 자동 생성됨
+
+**예시 — zai-coding-plan 구독:**
+```jsonc
+// opencode.json
+{
+  "model": "zai-coding-plan/glm-5-turbo",  // ← 이걸로 zai-coding-plan 감지
+  "plugin": ["maskweaver/plugin"]
+}
+```
+→ GLM 에이전트가 자동 생성됨
+
+자동 감지 결과는 `maskweaver.config.json`에 저장됩니다. 직접 편집하여 풀을 커스터마이즈할 수 있습니다.
 
 ---
 
@@ -621,190 +654,93 @@ New-Item -ItemType Directory -Force -Path $configPath
 "@ | Out-File -Encoding UTF8 "$configPath\opencode.json"
 ```
 
-### 3단계: 사용자의 인증된 프로바이더 확인 (필수!)
+### 3단계: 구독 자동 감지 (필수!)
 
 **질문하기 전에, 먼저 다음 명령어로 사용자의 환경을 확인하세요:**
 
 ```bash
 # 인증된 프로바이더 확인
-opencode auth list
+opencode providers list
 
 # 사용 가능한 모델 확인
 opencode models
 ```
 
-`opencode auth list` 출력 예시:
+`opencode providers list` 출력 예시:
 ```
-●  OpenAI oauth
-●  Google oauth
-●  GitHub Copilot oauth
-●  Anthropic oauth
-```
-
-이 정보로 사용자가 이미 인증한 서비스를 알 수 있습니다. **이 정보를 바탕으로 적절한 모델을 제안하세요.**
-
-### 4단계: 사용 가능한 모델 분석 및 자동 추천
-
-**`opencode models`를 실행하고 결과를 분석하세요.** 작업 유형을 물어보지 말고, 사용 가능한 모델을 기반으로 바로 추천하세요.
-
-#### 모델 분류 규칙
-
-모델 목록을 분석하여 각 모델을 분류합니다:
-
-**Premium 티어** (깊은 사고, 아키텍처):
-- 포함 키워드: `opus`, `o1`, `gpt-5`, `thinking`, `xhigh`, `kimi-2.5`
-- 예시: `codex/gpt-5.2`, `claude-opus-4`, `o1-preview`
-
-**Human 티어** (일반 개발):
-- 포함 키워드: `sonnet`, `gpt-4o` (mini 제외), `glm-4.7` (flash 제외), `gemini-pro`, `gemini-3-flash` (minimal 제외)
-- 예시: `claude-sonnet-4`, `gpt-4o`, `glm-4.7`
-
-**Flash 티어** (빠른 작업):
-- 포함 키워드: `haiku`, `flash`, `mini`, `minimal`, `instant`, `turbo`
-- 예시: `claude-haiku-4`, `gpt-4o-mini`, `gemini-3-flash`
-
-#### 우선순위 (여러 모델이 있을 때)
-
-**Premium:**
-1. `codex/gpt-5.2` (variant: xhigh) - 최고의 추론
-2. `*opus-4-5-thinking` 또는 `*opus-4.5` - 전략적 사고
-3. `kimi-coding/kimi-2.5` - 좋은 대안
-4. `*claude-opus-4` - 안정적
-
-**Human:**
-1. `*antigravity-gemini-3-flash` 또는 `zai-coding-plan/glm-4.7` - 빠르고 유능
-2. `*claude-sonnet-4-5` 또는 `*claude-sonnet-4` - 균형
-3. `*gpt-4o` - 범용
-
-**Flash:**
-1. `*gemini-3-flash` (variant: minimal) - 가장 빠름
-2. `*glm-4.7-flash` 또는 `*haiku-4` - 빠른 응답
-3. `*gpt-4o-mini` - 저렴
-
-### 5단계: 사용자에게 자동 추천
-
-**`opencode models` 분석 후, 바로 추천합니다:**
-
-```
-🤖: 사용 가능한 모델을 확인했어요. 최적의 조합으로 설정할게요:
-
-    📊 **추천 설정:**
-    ┌─────────────┬──────────────────────────────┐
-    │ 복잡한 작업 │ codex/gpt-5.2 (xhigh)        │
-    │ 일반 개발   │ zai-coding-plan/glm-4.7      │
-    │ 빠른 작업   │ google/antigravity-gemini... │
-    └─────────────┴──────────────────────────────┘
-    
-    이대로 설정할까요? (다르게 하시려면 말씀해주세요)
+  Credentials ~\.local\share\opencode\auth.json
+│
+●  Z.AI Coding Plan  api
+●  OpenCode Go  api
+●  GitHub Copilot  oauth
+●  Anthropic  oauth
+└  10 credentials
 ```
 
-**모델을 분류할 수 없을 때**만 물어봅니다:
+Maskweaver는 이 정보로 자동으로 모델 풀을 구성합니다:
+
+| 감지된 프로바이더 | 자동 생성 에이전트 |
+|---|---|
+| **OpenCode Go** | DeepSeek V4 Flash/Pro, Qwen 3.6 Plus, Kimi K2.6 |
+| **Z.AI Coding Plan** | GLM-5 Turbo, GLM-5.1 |
+| 둘 다 | 위의 모든 에이전트 |
+
+### 4단계: 구독 확인 및 체크 (중요!)
+
+**구독이 만료되었지만 크레덴셜이 남아있을 수 있습니다.** 사용자에게 감지된 목록을 보여주고 확인하세요:
 
 ```
-🤖: 일부 모델을 분류하기 어려워요. 
-    `some-provider/unknown-model`은 어떤 용도로 쓰시겠어요?
-    
-    1. 복잡한 작업 (깊은 사고)
-    2. 일반 개발 
-    3. 빠른 단순 작업
+🤖: 감지된 구독을 확인했어요:
+
+    [x] OpenCode Go (api) → opencode-go
+    [x] Z.AI Coding Plan (api) → zai-coding-plan
+
+    이 구독들이 현재 유효한가요? 
+    만료된 구독이 있다면 maskweaver.config.json에서 제거해드릴게요.
 ```
 
-### 6단계: 예외 상황 처리
+사용자가 만료된 구독을 알려주면, 설정 파일에서 해당 풀 항목을 제거하세요.
 
-**프로바이더가 하나만 있을 때:**
-```
-🤖: Anthropic 모델만 사용 가능하네요. 자동으로 설정할게요:
-    - 복잡한 작업: anthropic/claude-opus-4
-    - 일반 개발: anthropic/claude-sonnet-4
-    - 빠른 작업: anthropic/claude-haiku-4
-```
+### 5단계: 설정 파일 자동 생성
 
-**적합한 Premium 모델이 없을 때:**
-```
-🤖: 복잡한 추론용 모델이 없어서, 일반 개발 모델을 대신 사용할게요:
-    - 복잡한 작업: anthropic/claude-sonnet-4 (대체)
-```
+Maskweaver가 `maskweaver.config.json`을 자동 생성합니다. 직접 만들 필요 없습니다!
 
-### 7단계: 메모리 기능 질문 (선택사항)
+플러그인이 로드되면:
+1. `opencode providers list` + `opencode models`로 구독 감지
+2. 감지된 구독에 맞는 `maskweaver.config.json` 자동 생성
+3. `.opencode/agents/dummy-*.md` 에이전트 파일 자동 생성
+4. OpenCode 재시작 안내
 
-사용자에게 물어보세요:
+**수동으로 설정 파일을 수정해야 하는 경우:**
+- 특정 구독을 제외하고 싶을 때
+- 다른 모델을 사용하고 싶을 때
+- 메모리 프로바이더를 설정하고 싶을 때
 
-> "프로젝트 기억 기능을 사용하시겠어요?
->
-> - **예** → 이전 대화와 결정사항을 기억합니다
-> - **아니오** → 기억 없이 사용합니다 (기본값, 나중에 설정 가능)"
-
-예를 선택한 경우:
-
-> "기억 저장 방식을 선택해주세요:
->
-> 1. **Ollama** (무료) - 컴퓨터에서 직접 처리, 인터넷 불필요
-> 2. **OpenAI** - 고품질 (API 키 필요)
-> 3. **VoyageAI** - 코드에 최적화! (API 키 필요, 추천)
-> 4. **OpenRouter** - 다양한 모델 선택 가능 (API 키 필요)
-> 5. **텍스트만** - 키워드 검색만 (API 키 불필요)"
-
-기억 저장 방식별 설정:
-
-| 방식 | 모델 | 특징 |
-|------|------|------|
-| Ollama | `bge-m3` | 무료, 로컬, `ollama pull bge-m3` 필요 |
-| OpenAI | `text-embedding-3-large` | 고품질 |
-| VoyageAI | `voyage-code-2` | **코드에 최적!** |
-| OpenRouter | `openai/text-embedding-3-large` | 다양한 모델 |
-| Text | `fts5` | API 키 불필요, 키워드 검색만 |
-
-### 8단계: 설정 파일 생성
-
-사용자 답변을 바탕으로 설정 파일을 생성합니다:
-
-#### Linux/macOS
-
-```bash
-cat > ~/.config/opencode/maskweaver.config.json << 'EOF'
+`maskweaver.config.json` (프로젝트 루트 또는 `~/.config/opencode/`):
+```json
 {
   "dummyHumans": {
-    "flash": "선택한_빠른_모델",
-    "human": "선택한_일반_모델",
-    "premium": "선택한_복잡_모델"
+    "pool": [
+      { "id": "glm-flash", "model": "zai-coding-plan/glm-5-turbo", "tier": "flash", "maxConcurrent": 10, "capabilities": ["search", "formatting", "simple-coding", "file-ops"], "costTier": "low" },
+      { "id": "glm-general", "model": "zai-coding-plan/glm-5.1", "tier": "human", "maxConcurrent": 10, "capabilities": ["coding", "testing", "refactoring", "backend"], "costTier": "medium" },
+      { "id": "glm-premium", "model": "zai-coding-plan/glm-5.1", "tier": "premium", "maxConcurrent": 10, "capabilities": ["architecture", "debugging", "reasoning", "complex-coding"], "costTier": "high" }
+    ]
   },
-  "memory": {
-    "provider": "선택한_프로바이더",
-    "enabled": true_또는_false
-  },
+  "operator": { "model": "zai-coding-plan/glm-5.1", "maxConcurrent": 10 },
+  "memory": { "provider": "text-only", "enabled": false },
   "language": "ko"
 }
-EOF
 ```
 
-#### Windows (PowerShell)
-
-```powershell
-@"
-{
-  "dummyHumans": {
-    "flash": "선택한_빠른_모델",
-    "human": "선택한_일반_모델",
-    "premium": "선택한_복잡_모델"
-  },
-  "memory": {
-    "provider": "선택한_프로바이더",
-    "enabled": true_또는_false
-  },
-  "language": "ko"
-}
-"@ | Out-File -Encoding UTF8 "$env:USERPROFILE\.config\opencode\maskweaver.config.json"
-```
-
-### 9단계: 완료 메시지
+### 6단계: 완료 메시지
 
 모든 설정이 완료된 후에만 사용자에게 알려주세요:
 
 > "✅ **Maskweaver 설정이 완료되었습니다!**
 >
 > **설정 내용:**
-> - AI 도우미: [선택한 서비스]
-> - 메모리 기능: [사용함/사용안함]
+> - 감지된 구독: opencode-go, zai-coding-plan
+> - 자동 생성된 에이전트: 8개 (dummy-deepseek-flash, dummy-glm-general, ...)
 >
 > **이제 OpenCode를 재시작해주세요!**
 >
@@ -816,14 +752,14 @@ EOF
 
 ### LLM 에이전트 주의사항
 
-1. **하세요**: `opencode auth list`로 먼저 인증된 프로바이더 확인
-2. **하세요**: 확인된 프로바이더 기반으로 모델 제안
-3. **하세요**: 각 옵션의 의미를 쉬운 말로 설명
-4. **하세요**: 최종 설정 내용을 요약해서 보여주기
+1. **하세요**: `opencode providers list`로 먼저 인증된 프로바이더 확인
+2. **하세요**: 감지된 구독이 실제로 유효한지 사용자에게 확인 (만료 + 크레덴셜 잔류 가능)
+3. **하세요**: 자동 감지 결과를 요약해서 보여주기
+4. **하세요**: 설정 파일은 자동 생성됨을 안내
 5. **하세요**: 모든 설정 완료 후에만 재시작 안내
 6. **하지 마세요**: 프로바이더 확인 없이 모델 선택 질문
 7. **하지 마세요**: "임베딩 프로바이더", "더미인간" 같은 기술 용어 사용
-8. **하지 마세요**: 설정 질문 건너뛰기
+8. **하지 마세요**: 설정 파일을 수동으로 만들지 마세요 — 자동 감지가 처리합니다
 
 ---
 

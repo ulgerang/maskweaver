@@ -10,6 +10,7 @@ import { getBuildStateDir, getBuildStatePath, toOpenspecChangePath } from '../ch
 import { readMapResult, lightReMap } from './map.js';
 import { updateOpenSpecTasks } from './openspec.js';
 import { getEffectiveGdcConfig, runGdcMachineCommand, countGdcCheckIssues } from '../gdc.js';
+// gherkin helpers used via formatExecutionPlan in execute.ts
 
 export function generateBuildId(): string {
     const now = new Date();
@@ -227,6 +228,19 @@ function generateBrief(
         lines.push(`### Verification`);
         for (const v of task.verify) lines.push(`- [${v.kind}] ${v.value}`);
         lines.push(``);
+    }
+    if (task.acceptanceCriteria && task.acceptanceCriteria.length > 0) {
+        lines.push(`### Acceptance Criteria (Gherkin)`);
+        lines.push(``);
+        lines.push(`Every scenario MUST pass before this task can be marked as completed.`);
+        lines.push(``);
+        for (const scenario of task.acceptanceCriteria) {
+            lines.push(`**Scenario: ${scenario.scenario}**`);
+            for (const g of scenario.given) lines.push(`  Given ${g}`);
+            for (const w of scenario.when) lines.push(`  When ${w}`);
+            for (const t of scenario.then) lines.push(`  Then ${t}`);
+            lines.push(``);
+        }
     }
     if (plan.structuralChanges && plan.structuralChanges.length > 0) {
         const agreed = plan.structuralChanges.filter(sc => sc.agreed);

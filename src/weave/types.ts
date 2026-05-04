@@ -153,6 +153,16 @@ export interface WeavePhase {
     masksUsed?: string[];          // Masks auto-selected during execution
     startedAt?: string;
     completedAt?: string;
+    acceptanceCriteria?: GherkinScenario[]; // Phase-level BDD/Gherkin acceptance criteria
+    featurePath?: string;          // Path to generated .feature file
+}
+
+export interface GherkinScenario {
+    feature: string;
+    scenario: string;
+    given: string[];
+    when: string[];
+    then: string[];
 }
 
 export interface WeaveTask {
@@ -165,10 +175,11 @@ export interface WeaveTask {
     files?: string[];              // Primary file targets for this task
     dependsOn?: string[];          // Task-level dependencies inside a phase
     verify?: Array<{
-        kind: 'command' | 'checklist';
+        kind: 'command' | 'checklist' | 'gherkin';
         value: string;
     }>;                            // Task-specific verification guidance
     acceptanceRefs?: string[];     // Links back to acceptance criteria / spec refs
+    acceptanceCriteria?: GherkinScenario[]; // BDD/Gherkin acceptance criteria
     retryCount: number;
     maxRetries: number;
     lastError?: string;

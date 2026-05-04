@@ -8,6 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { WeavePhase, WeavePlan, PhaseStatus } from './types.js';
+import type { GherkinScenario } from './types.js';
 import { yamlEscapeString, safeWriteFile, safeReadYaml, validatePlanStructure, repairAllPlans } from './yaml-repair.js';
 import type { RepairResult } from './yaml-repair.js';
 
@@ -178,6 +179,22 @@ function serializePlan(plan: WeavePlan): string {
         if (phase.completedAt) {
             lines.push(`    completed_at: ${yamlEscapeString(phase.completedAt)}`);
         }
+        if (phase.featurePath) {
+            lines.push(`    feature_path: ${yamlEscapeString(phase.featurePath)}`);
+        }
+        if (phase.acceptanceCriteria && phase.acceptanceCriteria.length > 0) {
+            lines.push('    acceptance_criteria:');
+            for (const ac of phase.acceptanceCriteria) {
+                lines.push(`      - feature: ${yamlEscapeString(ac.feature)}`);
+                lines.push(`        scenario: ${yamlEscapeString(ac.scenario)}`);
+                lines.push('        given:');
+                for (const g of ac.given) lines.push(`          - ${yamlEscapeString(g)}`);
+                lines.push('        when:');
+                for (const w of ac.when) lines.push(`          - ${yamlEscapeString(w)}`);
+                lines.push('        then:');
+                for (const t of ac.then) lines.push(`          - ${yamlEscapeString(t)}`);
+            }
+        }
 
         lines.push('    checklist:');
         for (const item of phase.checklist) {
@@ -216,6 +233,19 @@ function serializePlan(plan: WeavePlan): string {
             if (task.acceptanceRefs && task.acceptanceRefs.length > 0) {
                 lines.push(`        acceptance_refs: [${task.acceptanceRefs.map(ref => yamlEscapeString(ref)).join(', ')}]`);
             }
+            if (task.acceptanceCriteria && task.acceptanceCriteria.length > 0) {
+                lines.push('        acceptance_criteria:');
+                for (const ac of task.acceptanceCriteria) {
+                    lines.push(`          - feature: ${yamlEscapeString(ac.feature)}`);
+                    lines.push(`            scenario: ${yamlEscapeString(ac.scenario)}`);
+                    lines.push('            given:');
+                    for (const g of ac.given) lines.push(`              - ${yamlEscapeString(g)}`);
+                    lines.push('            when:');
+                    for (const w of ac.when) lines.push(`              - ${yamlEscapeString(w)}`);
+                    lines.push('            then:');
+                    for (const t of ac.then) lines.push(`              - ${yamlEscapeString(t)}`);
+                }
+            }
             if (task.maskUsed) {
                 lines.push(`        mask_used: ${yamlEscapeString(task.maskUsed)}`);
             }
@@ -236,6 +266,25 @@ function serializePlan(plan: WeavePlan): string {
     }
 
     return lines.join('\n');
+}
+
+function deserializeGherkinList(raw: any): GherkinScenario[] | undefined {
+    if (!raw || !Array.isArray(raw)) return undefined;
+    const scenarios: GherkinScenario[] = [];
+    for (const item of raw) {
+        if (!item || typeof item !== 'object') continue;
+        const feature = item.feature || '';
+        const scenario = item.scenario || '';
+        if (!feature && !scenario) continue;
+        scenarios.push({
+            feature,
+            scenario,
+            given: Array.isArray(item.given) ? item.given.filter((g: any) => typeof g === 'string') : [],
+            when: Array.isArray(item.when) ? item.when.filter((w: any) => typeof w === 'string') : [],
+            then: Array.isArray(item.then) ? item.then.filter((t: any) => typeof t === 'string') : [],
+        });
+    }
+    return scenarios.length > 0 ? scenarios : undefined;
 }
 
 // ============================================================================
@@ -752,6 +801,7 @@ export class PhaseManager {
                     dependsOn: t.depends_on || t.dependsOn,
                     verify: t.verify,
                     acceptanceRefs: t.acceptance_refs || t.acceptanceRefs,
+                    acceptanceCriteria: deserializeGherkinList(t.acceptance_criteria || t.acceptanceCriteria),
                     retryCount: t.retry_count || t.retryCount || 0,
                     maxRetries: t.max_retries || t.maxRetries || 5,
                     lastError: t.last_error || t.lastError,
@@ -763,6 +813,8 @@ export class PhaseManager {
                 startedAt: p.started_at || p.startedAt,
                 completedAt: p.completed_at || p.completedAt,
                 masksUsed: p.masks_used || p.masksUsed,
+                acceptanceCriteria: deserializeGherkinList(p.acceptance_criteria || p.acceptanceCriteria),
+                featurePath: p.feature_path || p.featurePath,
             })),
         };
     }

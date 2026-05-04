@@ -6,7 +6,8 @@
  * the plan is updated mechanically before implementation.
  */
 
-import type { PhaseStatus, WeavePhase, WeavePlan } from '../types.js';
+import type { PhaseStatus, WeavePhase, WeavePlan, GherkinScenario } from '../types.js';
+import { parseGherkinBlock } from '../gherkin.js';
 
 const STATUS_VALUES: Set<PhaseStatus> = new Set([
     'pending',
@@ -392,6 +393,88 @@ export function refinePlanFromNotes(plan: WeavePlan, notesContent: string): Refi
                 task.name = name;
                 changes.push(`~ ${phase.id} task ${taskId}: "${old}" -> "${name}"`);
             }
+        }
+
+        if (matched) continue;
+
+        const addCriteria = /^@phase\s+([A-Za-z0-9_-]+)\s+add_criteria\s*:\s*(.+)$/is.exec(line);
+        if (addCriteria) {
+            directivesParsed += 1;
+            matched = true;
+            const phaseId = addCriteria[1].toUpperCase();
+            const rawBlock = addCriteria[2].trim();
+            const phase = findPhase(updated, phaseId);
+            if (!phase) {
+                warnings.push(`Line ${i + 1}: phase ${phaseId} not found (skipped criteria add).`);
+                continue;
+            }
+
+            const scenarios = parseGherkinBlock(rawBlock);
+            if (scenarios.length === 0) {
+                warnings.push(`Line ${i + 1}: could not parse Gherkin block for ${phaseId}.`);
+                continue;
+            }
+
+            if (!phase.acceptanceCriteria) phase.acceptanceCriteria = [];
+            phase.acceptanceCriteria.push(...scenarios);
+            changes.push(`+ ${phaseId} acceptance criteria: ${scenarios.length} scenario(s)`);
+        }
+
+        if (matched) continue;
+
+        const replaceCriteria = /^@phase\s+([A-Za-z0-9_-]+)\s+replace_criteria\s*:\s*(.+)$/is.exec(line);
+        if (replaceCriteria) {
+            directivesParsed += 1;
+            matched = true;
+            const phaseId = replaceCriteria[1].toUpperCase();
+            const rawBlock = replaceCriteria[2].trim();
+            const phase = findPhase(updated, phaseId);
+            if (!phase) {
+                warnings.push(`Line ${i + 1}: phase ${phaseId} not found (skipped criteria replace).`);
+                continue;
+            }
+
+            const scenarios = parseGherkinBlock(rawBlock);
+            if (scenarios.length === 0) {
+                warnings.push(`Line ${i + 1}: could not parse Gherkin block for ${phaseId}.`);
+                continue;
+            }
+
+            phase.acceptanceCriteria = scenarios;
+            changes.push(`~ ${phaseId} acceptance criteria replaced: ${scenarios.length} scenario(s)`);
+        }
+
+        if (matched) continue;
+
+        const taskCriteria = /^@task\s+([A-Za-z0-9_-]+)\s+([A-Za-z0-9_-]+)\s+criteria\s*:\s*(.+)$/is.exec(line);
+        if (taskCriteria) {
+            directivesParsed += 1;
+            matched = true;
+            const phaseId = taskCriteria[1].toUpperCase();
+            const taskId = taskCriteria[2].trim();
+            const rawBlock = taskCriteria[3].trim();
+            const phase = findPhase(updated, phaseId);
+            if (!phase) {
+                warnings.push(`Line ${i + 1}: phase ${phaseId} not found (skipped task criteria).`);
+                continue;
+            }
+
+            const task = phase.tasks.find(t => t.id === taskId);
+            if (!task) {
+                warnings.push(`Line ${i + 1}: task ${taskId} not found in ${phaseId} (skipped criteria).`);
+                continue;
+            }
+
+            const scenarios = parseGherkinBlock(rawBlock);
+            if (scenarios.length === 0) {
+                warnings.push(`Line ${i + 1}: could not parse Gherkin block for ${taskId}.`);
+                continue;
+            }
+
+            task.acceptanceCriteria = scenarios;
+            if (!task.verify) task.verify = [];
+            task.verify.push({ kind: 'gherkin', value: `${scenarios.length} scenario(s)` });
+            changes.push(`~ ${phaseId}/${taskId} acceptance criteria: ${scenarios.length} scenario(s)`);
         }
 
         if (matched) continue;

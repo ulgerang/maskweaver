@@ -36,3 +36,6 @@ pnpm-lock.yaml
 .opencode/
 .worktrees/
 nul
+
+# OMX tool data
+.omx/

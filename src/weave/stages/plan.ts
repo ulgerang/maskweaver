@@ -16,6 +16,11 @@ import {
     countGdcCheckIssues,
 } from '../gdc.js';
 import { generateOpenSpecArtifacts, ensureOpenSpecWorkspace } from './openspec.js';
+import {
+    generateGherkinForPhase,
+    generateGherkinForTask,
+    writeAllFeatureFiles,
+} from '../gherkin.js';
 
 // ============================================================================
 // Types
@@ -576,6 +581,10 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
                 const shardScope = shardOriginalPhases.map(phase => phase.name).join(', ');
                 const shardHours = shardOriginalPhases.reduce((sum, phase) => sum + (phase.estimatedHours || 3), 0);
 
+                for (const phase of shardOriginalPhases) {
+                    (phase as any).acceptanceCriteria = generateGherkinForPhase(phase);
+                }
+
                 const shardPlan = await manager.createPlan({
                     planName: shardPlanName,
                     projectName,
@@ -677,6 +686,25 @@ export async function plan(options: PlanOptions): Promise<PlanResult> {
         // OpenSpec generation is best-effort
     }
 
+    // Generate Gherkin acceptance criteria for each phase
+    for (const phase of weavePlan.phases) {
+        if (!phase.acceptanceCriteria || phase.acceptanceCriteria.length === 0) {
+            phase.acceptanceCriteria = generateGherkinForPhase(phase);
+        }
+    }
+
+    // Generate .feature files from acceptance criteria
+    try {
+        const featurePaths = await writeAllFeatureFiles(basePath || process.cwd(), weavePlan.phases);
+        for (const [phaseId, featurePath] of featurePaths) {
+            const phase = weavePlan.phases.find(p => p.id === phaseId);
+            if (phase) phase.featurePath = featurePath;
+        }
+        await manager.savePlan(weavePlan);
+    } catch {
+        // Feature file generation is best-effort
+    }
+
     // Generate summary
     const summary = generatePlanSummary(weavePlan, estimatedTotalHours);
 
@@ -697,7 +725,6 @@ function generateDefaultPhaseTasks(
         nodeFileMap?: Map<string, string[]>;
     }
 ): Array<Omit<WeavePhase['tasks'][0], 'status' | 'retryCount'>> {
-    // Keep tasks small, specific, and runnable. Downstream craft can refine.
     const baseId = phase.id;
     const title = phase.name;
     const nodeIds = (gdc?.nodeIds || []).slice(0, 4);
@@ -706,6 +733,15 @@ function generateDefaultPhaseTasks(
         .flatMap(nodeId => gdc?.nodeFileMap?.get(nodeId) || [])
         .filter(Boolean)
         .slice(0, 8);
+
+    const implCriteria = generateGherkinForTask(
+        { id: `${baseId}-T1`, name: `${title} 구현`, testCase: phase.doneWhen },
+        phase,
+    );
+    const testCriteria = generateGherkinForTask(
+        { id: `${baseId}-T2`, name: `${title} 테스트 추가/수정`, testCase: '관련 테스트가 통과한다' },
+        phase,
+    );
 
     return [
         {
@@ -722,6 +758,7 @@ function generateDefaultPhaseTasks(
                 `phase:${phase.id}`,
                 `done_when:${phase.doneWhen}`,
             ],
+            acceptanceCriteria: [implCriteria],
             maxRetries: 3,
         },
         {
@@ -737,6 +774,7 @@ function generateDefaultPhaseTasks(
                 { kind: 'command', value: 'gdc check --machine' },
             ],
             acceptanceRefs: [`phase:${phase.id}:tests`],
+            acceptanceCriteria: [testCriteria],
             maxRetries: 2,
         },
         {

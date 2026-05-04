@@ -15,6 +15,7 @@ import { WeaveOrchestrator, getOrchestrator } from '../orchestrator.js';
 import { PhaseManager, getPhaseManager } from '../phase-manager.js';
 import { searchTroubleshooting, recordTroubleshooting } from '../knowledge/global.js';
 import { analyzeParallelOpportunities, formatParallelAnalysis } from '../bridge.js';
+import { detectBDDFramework } from '../gherkin.js';
 import { spawn } from 'node:child_process';
 import * as path from 'node:path';
 import { copyFile, mkdir } from 'node:fs/promises';
@@ -295,6 +296,49 @@ export function formatExecutionPlan(plan: PhaseExecutionPlan): string {
         lines.push('');
     }
 
+    // Gherkin Acceptance Criteria section
+    const allScenarios = plan.taskPlans
+        .filter(tp => tp.task.acceptanceCriteria && tp.task.acceptanceCriteria.length > 0)
+        .flatMap(tp => tp.task.acceptanceCriteria!);
+    if (allScenarios.length > 0) {
+        lines.push('### Acceptance Criteria (Gherkin)');
+        lines.push('');
+        lines.push('Each task MUST satisfy its acceptance criteria before marking as passed.');
+        lines.push('');
+
+        for (const tp of plan.taskPlans) {
+            if (!tp.task.acceptanceCriteria || tp.task.acceptanceCriteria.length === 0) continue;
+            lines.push(`**${tp.task.name}** (${tp.task.id}):`);
+            for (const scenario of tp.task.acceptanceCriteria) {
+                lines.push(`  - Scenario: ${scenario.scenario}`);
+                for (const g of scenario.given) lines.push(`    - Given ${g}`);
+                for (const w of scenario.when) lines.push(`    - When ${w}`);
+                for (const t of scenario.then) lines.push(`    - Then ${t}`);
+            }
+            lines.push('');
+        }
+    }
+
+    // BDD Framework detection
+    const basePathForDetect = plan.taskPlans[0]?.task?.files?.[0]
+        ? path.dirname(plan.taskPlans[0].task.files[0])
+        : undefined;
+    if (allScenarios.length > 0 && basePathForDetect) {
+        try {
+            const bdd = detectBDDFramework(basePathForDetect);
+            if (bdd.detected) {
+                lines.push('### BDD Framework Detected');
+                lines.push('');
+                lines.push(`- Framework: ${bdd.framework}`);
+                if (bdd.testCommand) lines.push(`- Test command: \`${bdd.testCommand}\``);
+                if (bdd.featureDir) lines.push(`- Feature directory: \`${bdd.featureDir}\``);
+                lines.push('');
+            }
+        } catch {
+            // Best effort
+        }
+    }
+
     // Execution instructions for the Mask Weaver
     lines.push('### Instructions');
     lines.push('');
@@ -380,7 +424,7 @@ export async function execute(options: ExecuteOptions): Promise<ExecuteResult> {
 export interface VerificationLayer {
     name: string;
     order: number;
-    type: 'build' | 'test' | 'visual' | 'api' | 'accessibility';
+    type: 'build' | 'test' | 'visual' | 'api' | 'accessibility' | 'gherkin';
     enabled: boolean;
 }
 
@@ -402,6 +446,8 @@ export interface AIVerificationOptions {
     enableDevTools?: boolean;
     /** Verification scope. quick: TypeCheck + UnitTests only. full: all available. */
     mode?: 'quick' | 'full';
+    /** Gherkin scenarios to verify during the BDD layer. */
+    gherkinScenarios?: Array<{ feature: string; scenario: string; given: string[]; when: string[]; then: string[] }>;
 }
 
 /**
@@ -438,6 +484,9 @@ export async function runAIVerification(options: AIVerificationOptions): Promise
                     break;
                 case 'accessibility':
                     result = await runAccessibilityVerification(options);
+                    break;
+                case 'gherkin':
+                    result = await runGherkinVerification(options);
                     break;
                 default:
                     continue;
@@ -494,6 +543,9 @@ function getVerificationLayers(options: AIVerificationOptions): VerificationLaye
 
         // Layer 6: Accessibility (optional)
         { name: 'Accessibility', order: 8, type: 'accessibility', enabled: false },
+
+        // Layer 7: Gherkin/BDD Acceptance Criteria (AI verification)
+        { name: 'GherkinAcceptance', order: 9, type: 'gherkin', enabled: (options.gherkinScenarios?.length ?? 0) > 0 },
     ];
 }
 
@@ -894,6 +946,76 @@ async function runAccessibilityVerification(options: AIVerificationOptions): Pro
     logs.push('[A11y] Would run axe-core accessibility scan');
 
     return { passed: true, logs, layer: 'Accessibility', duration: 0 };
+}
+
+// ============================================================================
+// Gherkin/BDD Acceptance Criteria Verification
+// ============================================================================
+
+async function runGherkinVerification(options: AIVerificationOptions): Promise<VerificationResult> {
+    const startTime = Date.now();
+    const scenarios = options.gherkinScenarios || [];
+    const logs: string[] = [];
+
+    if (scenarios.length === 0) {
+        return { passed: true, logs: ['[Gherkin] No scenarios to verify'], layer: 'GherkinAcceptance', duration: 0 };
+    }
+
+    logs.push(`[Gherkin] Verifying ${scenarios.length} acceptance scenario(s)...`);
+
+    // Check for BDD framework in project
+    const bdd = detectBDDFramework(options.projectPath);
+    if (bdd.detected && bdd.testCommand) {
+        logs.push(`[Gherkin] BDD framework detected: ${bdd.framework}`);
+        logs.push(`[Gherkin] Running: ${bdd.testCommand}`);
+
+        const result = await runShellCommand(bdd.testCommand, options.projectPath);
+
+        if (result.stdout) {
+            for (const line of result.stdout.split(/\r?\n/).slice(-10)) {
+                if (line.trim()) logs.push(`  > ${line}`);
+            }
+        }
+
+        if (result.exitCode === 0) {
+            logs.push(`[Gherkin] BDD tests passed`);
+            return { passed: true, logs, layer: 'GherkinAcceptance', duration: result.durationMs };
+        }
+
+        // BDD framework ran but some scenarios failed
+        logs.push(`[Gherkin] BDD tests failed (exit=${result.exitCode})`);
+        if (result.stderr) {
+            for (const line of result.stderr.split(/\r?\n/).slice(-5)) {
+                if (line.trim()) logs.push(`  > ${line}`);
+            }
+        }
+        return {
+            passed: false,
+            error: `${scenarios.length} Gherkin scenario(s) failed BDD verification`,
+            logs,
+            layer: 'GherkinAcceptance',
+            duration: result.durationMs,
+        };
+    }
+
+    // No BDD framework: AI-assisted verification checklist
+    logs.push(`[Gherkin] No BDD framework detected. Generating AI verification checklist.`);
+    logs.push('');
+    logs.push('## Acceptance Scenarios to Verify:');
+    logs.push('');
+
+    for (const scenario of scenarios) {
+        logs.push(`**Scenario: ${scenario.scenario}**`);
+        for (const g of scenario.given) logs.push(`  Given ${g}`);
+        for (const w of scenario.when) logs.push(`  When ${w}`);
+        for (const t of scenario.then) logs.push(`  Then ${t}`);
+        logs.push('');
+    }
+
+    logs.push('[Gherkin] AI should verify each scenario by examining the implementation.');
+    logs.push('[Gherkin] If any "Then" assertion is not satisfied, report failure.');
+
+    return { passed: true, logs, layer: 'GherkinAcceptance', duration: Date.now() - startTime };
 }
 
 // ============================================================================

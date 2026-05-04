@@ -71,112 +71,209 @@ function getPackageVersion() {
   }
 }
 
-const DEFAULT_GLOBAL_CONFIG_TEMPLATE = {
-  dummyHumans: {
-    pool: [
-      {
-        id: 'deepseek-flash',
-        model: 'opencode-go/deepseek-v4-flash',
-        tier: 'flash',
-        maxConcurrent: 5,
-        capabilities: ['search', 'formatting', 'simple-coding', 'file-ops'],
-        costTier: 'low',
-        description: 'DeepSeek V4 Flash - 빠름. 단순 검색/포매팅/파일작업',
-      },
-      {
-        id: 'deepseek-general',
-        model: 'opencode-go/deepseek-v4-flash',
-        tier: 'human',
-        maxConcurrent: 3,
-        capabilities: ['coding', 'testing', 'refactoring', 'backend'],
-        costTier: 'medium',
-        description: 'DeepSeek V4 Flash - 일반. 코딩/리팩토링/백엔드',
-      },
-      {
-        id: 'qwen-vision',
-        model: 'opencode-go/qwen3.6-plus',
-        tier: 'human',
-        maxConcurrent: 3,
-        capabilities: ['vision', 'frontend', 'testing'],
-        costTier: 'medium',
-        description: 'Qwen 3.6 Plus - 비전. 이미지 분석/프론트엔드/테스트',
-      },
-      {
-        id: 'deepseek-pro',
-        model: 'opencode-go/deepseek-v4-pro',
-        tier: 'premium',
-        maxConcurrent: 2,
-        capabilities: ['architecture', 'debugging', 'reasoning', 'complex-coding', 'refactoring'],
-        costTier: 'high',
-        description: 'DeepSeek V4 Pro - 고급 추론. 아키텍처/복잡 디버깅',
-      },
-      {
-        id: 'kimi-vision',
-        model: 'opencode-go/kimi-k2.6',
-        tier: 'premium',
-        maxConcurrent: 2,
-        capabilities: ['vision', 'reasoning', 'complex-coding', 'architecture', 'debugging'],
-        costTier: 'high',
-        description: 'Kimi K2.6 - 비전 고급. 이미지 분석/복잡 추론',
-      },
-    ],
+const ZAI_POOL = [
+  {
+    id: 'glm-flash',
+    model: 'zai-coding-plan/glm-5-turbo',
+    tier: 'flash',
+    maxConcurrent: 1,
+    capabilities: ['search', 'formatting', 'simple-coding', 'file-ops'],
+    costTier: 'low',
+    description: 'GLM-5 Turbo - 빠름. 단순 검색/포매팅/파일작업',
   },
-  operator: {
+  {
+    id: 'glm-general',
+    model: 'zai-coding-plan/glm-5.1',
+    tier: 'human',
+    maxConcurrent: 10,
+    capabilities: ['coding', 'testing', 'refactoring', 'backend'],
+    costTier: 'medium',
+    description: 'GLM-5.1 - 일반. 코딩/리팩토링/백엔드',
+  },
+  {
+    id: 'glm-premium',
+    model: 'zai-coding-plan/glm-5.1',
+    tier: 'premium',
+    maxConcurrent: 10,
+    capabilities: ['architecture', 'debugging', 'reasoning', 'complex-coding', 'refactoring'],
+    costTier: 'high',
+    description: 'GLM-5.1 - 고급 추론. 아키텍처/복잡 디버깅',
+  },
+];
+
+const OPENCODE_GO_POOL = [
+  {
+    id: 'deepseek-flash',
+    model: 'opencode-go/deepseek-v4-flash',
+    tier: 'flash',
+    maxConcurrent: 5,
+    capabilities: ['search', 'formatting', 'simple-coding', 'file-ops'],
+    costTier: 'low',
+    description: 'DeepSeek V4 Flash - 빠름. 단순 검색/포매팅/파일작업',
+  },
+  {
+    id: 'deepseek-general',
+    model: 'opencode-go/deepseek-v4-flash',
+    tier: 'human',
+    maxConcurrent: 3,
+    capabilities: ['coding', 'testing', 'refactoring', 'backend'],
+    costTier: 'medium',
+    description: 'DeepSeek V4 Flash - 일반. 코딩/리팩토링/백엔드',
+  },
+  {
+    id: 'qwen-vision',
+    model: 'opencode-go/qwen3.6-plus',
+    tier: 'human',
+    maxConcurrent: 3,
+    capabilities: ['vision', 'frontend', 'testing'],
+    costTier: 'medium',
+    description: 'Qwen 3.6 Plus - 비전. 이미지 분석/프론트엔드/테스트',
+  },
+  {
+    id: 'deepseek-pro',
     model: 'opencode-go/deepseek-v4-pro',
+    tier: 'premium',
     maxConcurrent: 2,
-    description: 'Squad Operator model - 작업 오케스트레이션 및 고급 추론',
+    capabilities: ['architecture', 'debugging', 'reasoning', 'complex-coding', 'refactoring'],
+    costTier: 'high',
+    description: 'DeepSeek V4 Pro - 고급 추론. 아키텍처/복잡 디버깅',
   },
-  memory: {
-    provider: 'text-only',
-    enabled: false,
+  {
+    id: 'kimi-vision',
+    model: 'opencode-go/kimi-k2.6',
+    tier: 'premium',
+    maxConcurrent: 2,
+    capabilities: ['vision', 'reasoning', 'complex-coding', 'architecture', 'debugging'],
+    costTier: 'high',
+    description: 'Kimi K2.6 - 비전 고급. 이미지 분석/복잡 추론',
   },
-  gdc: {
-    enabled: 'auto',
-    strictVerify: false,
-    autoSyncOnPrepare: true,
-  },
-  language: 'ko',
-};
+];
+
+function runCli(command, args) {
+  try {
+    const result = spawnSync(command, args, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 8000,
+      windowsHide: true,
+    });
+    if (result.error || result.status !== 0) return null;
+    return result.stdout || null;
+  } catch {
+    return null;
+  }
+}
+
+function detectSubscription() {
+  let hasOpencodeGo = false;
+  let hasZai = false;
+
+  const providersOutput = runCli('opencode', ['providers', 'list']);
+  if (providersOutput) {
+    const stripped = providersOutput.replace(/\x1b\[[0-9;]*m/g, '');
+    if (/opencode\s*go/i.test(stripped)) hasOpencodeGo = true;
+    if (/z\.ai\s*coding\s*plan|zai-coding-plan/i.test(stripped)) hasZai = true;
+  }
+
+  const modelsOutput = runCli('opencode', ['models']);
+  if (modelsOutput) {
+    if (/^opencode-go\//m.test(modelsOutput)) hasOpencodeGo = true;
+    if (/^zai-coding-plan\//m.test(modelsOutput)) hasZai = true;
+  }
+
+  if (hasZai) return 'zai-coding-plan';
+  if (hasOpencodeGo) return 'opencode-go';
+
+  const candidates = [
+    join(homedir(), '.config', 'opencode', 'opencode.json'),
+    join(homedir(), '.config', 'opencode', 'opencode.jsonc'),
+  ];
+
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    try {
+      let content = readFileSync(candidate, 'utf-8');
+      content = content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+      const parsed = JSON.parse(content);
+      if (!parsed || typeof parsed !== 'object') continue;
+
+      const modelFields = ['model', 'small_model', 'large_model'];
+      for (const field of modelFields) {
+        const val = parsed[field];
+        if (typeof val !== 'string' || !val) continue;
+        if (val.startsWith('opencode-go/')) hasOpencodeGo = true;
+        if (val.startsWith('zai-coding-plan/')) hasZai = true;
+      }
+    } catch { continue; }
+  }
+
+  if (hasZai) return 'zai-coding-plan';
+  if (hasOpencodeGo) return 'opencode-go';
+  return 'opencode-go';
+}
+
+function buildConfigForSubscription(subscription) {
+  const pool = subscription === 'zai-coding-plan'
+    ? [...ZAI_POOL, ...OPENCODE_GO_POOL]
+    : [...OPENCODE_GO_POOL];
+
+  const operatorModel = subscription === 'zai-coding-plan'
+    ? 'zai-coding-plan/glm-5.1'
+    : 'opencode-go/deepseek-v4-pro';
+
+  const operatorConcurrent = subscription === 'zai-coding-plan' ? 10 : 2;
+
+  return {
+    dummyHumans: { pool },
+    operator: {
+      model: operatorModel,
+      maxConcurrent: operatorConcurrent,
+      description: 'Squad Operator model - 작업 오케스트레이션 및 고급 추론',
+    },
+    memory: { provider: 'text-only', enabled: false },
+    gdc: { enabled: 'auto', strictVerify: false, autoSyncOnPrepare: true },
+    language: 'ko',
+  };
+}
+
+const DEFAULT_GLOBAL_CONFIG_TEMPLATE = buildConfigForSubscription('opencode-go');
 
 function ensureGlobalConfig() {
   const globalDir = join(homedir(), '.config', 'opencode');
   const globalConfigPath = join(globalDir, 'maskweaver.config.json');
 
   if (!existsSync(globalConfigPath)) {
-    // Fresh install: create config from template
+    const subscription = detectSubscription();
+    const template = buildConfigForSubscription(subscription);
     try {
       if (!existsSync(globalDir)) {
         mkdirSync(globalDir, { recursive: true });
       }
       writeFileSync(
         globalConfigPath,
-        JSON.stringify(DEFAULT_GLOBAL_CONFIG_TEMPLATE, null, 2) + '\n',
+        JSON.stringify(template, null, 2) + '\n',
         'utf-8'
       );
-      return { created: true, migrated: false };
+      return { created: true, migrated: false, subscription };
     } catch {
-      return { created: false, migrated: false };
+      return { created: false, migrated: false, subscription };
     }
   }
 
-  // Existing config: migrate — add missing fields without overwriting user edits
   try {
     const existing = JSON.parse(readFileSync(globalConfigPath, 'utf-8'));
     let changed = false;
 
-    // Migrate: add operator if missing
     if (!existing.operator) {
       existing.operator = DEFAULT_GLOBAL_CONFIG_TEMPLATE.operator;
       changed = true;
     }
 
-    // Migrate: add gdc if missing
     if (!existing.gdc) {
       existing.gdc = DEFAULT_GLOBAL_CONFIG_TEMPLATE.gdc;
       changed = true;
     }
 
-    // Migrate: add dummyHumans if missing
     if (!existing.dummyHumans) {
       existing.dummyHumans = DEFAULT_GLOBAL_CONFIG_TEMPLATE.dummyHumans;
       changed = true;
@@ -190,9 +287,10 @@ function ensureGlobalConfig() {
       );
     }
 
-    return { created: false, migrated: changed };
+    const subscription = detectSubscription();
+    return { created: false, migrated: changed, subscription };
   } catch {
-    return { created: false, migrated: false };
+    return { created: false, migrated: false, subscription: 'opencode-go' };
   }
 }
 
@@ -204,12 +302,17 @@ function main() {
   if (configResult.created) {
     console.log(`✓ maskweaver v${pkgVersion}: 글로벌 설정 파일 생성됨`);
     console.log(`  → ~/.config/opencode/maskweaver.config.json`);
+    console.log(`  감지된 구독: ${configResult.subscription}`);
     console.log(`  편집 후 프로젝트에서 \`weave sync-agents\`를 실행하세요`);
     console.log('');
   } else if (configResult.migrated) {
     console.log(`✓ maskweaver v${pkgVersion}: 글로벌 설정 파일 업데이트됨`);
     console.log(`  → ~/.config/opencode/maskweaver.config.json`);
     console.log(`  operator 및 gdc 설정이 추가되었습니다.`);
+    console.log('');
+  } else if (configResult.subscription === 'zai-coding-plan') {
+    console.log(`✓ maskweaver v${pkgVersion}: zai-coding-plan 구독 감지됨`);
+    console.log(`  GLM-5.1 모델이 풀에 포함되어 있습니다.`);
     console.log('');
   }
 

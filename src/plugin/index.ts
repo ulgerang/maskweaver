@@ -45,10 +45,10 @@ import { createWeaveTool } from './tools/weave.js';
 import { createSlashcommandTool } from './tools/slashcommand.js';
 import { loadRuntimeConfig, normalizeDummyHumansConfig } from '../shared/config.js';
 import {
-  generatePoolAgentFiles,
   generatePoolAgentFilesFromConfig,
   writeDefaultRuntimeConfig,
   writeDefaultPluginConfig,
+  writeAutoDetectedConfig,
 } from '../shared/generate-agents.js';
 
 // ============================================================================
@@ -896,7 +896,13 @@ export const MaskweaverPlugin: Plugin = async ({ client, directory, project, wor
     pluginLog(client, 'info', `Created global config: ${path.relative(os.homedir(), createdGlobalConfig)}`);
   }
 
-  const createdRuntimeConfig = writeDefaultRuntimeConfig(directory);
+  // Auto-detect subscription from opencode.json and create project config if missing
+  const autoDetected = writeAutoDetectedConfig(directory);
+  if (autoDetected) {
+    pluginLog(client, 'info', `Auto-detected subscription: ${autoDetected.detection.primary} (${autoDetected.detection.subscriptions.join(', ')}) — created ${path.relative(directory, autoDetected.path)}`);
+  }
+
+  const createdRuntimeConfig = !autoDetected ? writeDefaultRuntimeConfig(directory) : null;
   if (createdRuntimeConfig) {
     pluginLog(client, 'info', `Created project config: ${path.relative(directory, createdRuntimeConfig)}`);
   }

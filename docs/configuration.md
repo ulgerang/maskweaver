@@ -14,10 +14,47 @@ Complete guide to configuring Maskweaver for your needs.
 
 Maskweaver supports two configuration locations:
 
-1. **Project-specific:** `.opencode/maskweaver.config.ts` or `maskweaver.config.ts`
-2. **User-wide:** `~/.config/opencode/maskweaver.config.ts`
+1. **Project-specific:** `maskweaver.config.json` (project root)
+2. **User-wide:** `~/.config/opencode/maskweaver.config.json`
 
 Project configuration takes precedence over user configuration.
+
+---
+
+## Subscription Auto-Detection (Zero Config)
+
+Maskweaver automatically detects your opencode subscription and generates the appropriate model pool.
+
+### How It Works
+
+On first load, Maskweaver runs:
+1. `opencode providers list` — checks for **OpenCode Go** and **Z.AI Coding Plan** providers
+2. `opencode models` — validates available models by prefix (`opencode-go/*`, `zai-coding-plan/*`)
+3. Falls back to reading `opencode.json` config files if CLI is unavailable
+
+### Detected Providers
+
+| Detected Provider | Generated Agents |
+|---|---|
+| **OpenCode Go** | DeepSeek V4 Flash/Pro, Qwen 3.6 Plus, Kimi K2.6 |
+| **Z.AI Coding Plan** | GLM-5 Turbo (flash), GLM-5.1 (human/premium) |
+| Both | All of the above |
+
+### Manual Override
+
+If auto-detection includes expired subscriptions (credentials may linger), edit `maskweaver.config.json` to remove unwanted pool entries:
+
+```json
+{
+  "dummyHumans": {
+    "pool": [
+      { "id": "glm-general", "model": "zai-coding-plan/glm-5.1", "tier": "human", "maxConcurrent": 10, "capabilities": ["coding", "testing", "refactoring", "backend"], "costTier": "medium" }
+    ]
+  }
+}
+```
+
+To re-run auto-detection: delete `maskweaver.config.json` and restart OpenCode.
 
 ---
 

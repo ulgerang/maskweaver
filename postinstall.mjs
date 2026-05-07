@@ -149,42 +149,16 @@ const OPENCODE_GO_POOL = [
   },
 ];
 
-function runCli(command, args) {
-  try {
-    const result = spawnSync(command, args, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 8000,
-      windowsHide: true,
-    });
-    if (result.error || result.status !== 0) return null;
-    return result.stdout || null;
-  } catch {
-    return null;
-  }
-}
-
 function detectSubscription() {
   let hasOpencodeGo = false;
   let hasZai = false;
 
-  const providersOutput = runCli('opencode', ['providers', 'list']);
-  if (providersOutput) {
-    const stripped = providersOutput.replace(/\x1b\[[0-9;]*m/g, '');
-    if (/opencode\s*go/i.test(stripped)) hasOpencodeGo = true;
-    if (/z\.ai\s*coding\s*plan|zai-coding-plan/i.test(stripped)) hasZai = true;
-  }
-
-  const modelsOutput = runCli('opencode', ['models']);
-  if (modelsOutput) {
-    if (/^opencode-go\//m.test(modelsOutput)) hasOpencodeGo = true;
-    if (/^zai-coding-plan\//m.test(modelsOutput)) hasZai = true;
-  }
-
-  if (hasZai) return 'zai-coding-plan';
-  if (hasOpencodeGo) return 'opencode-go';
-
+  const initCwd = process.env.INIT_CWD;
   const candidates = [
+    ...(initCwd ? [
+      join(initCwd, 'opencode.json'),
+      join(initCwd, 'opencode.jsonc'),
+    ] : []),
     join(homedir(), '.config', 'opencode', 'opencode.json'),
     join(homedir(), '.config', 'opencode', 'opencode.jsonc'),
   ];
@@ -198,11 +172,20 @@ function detectSubscription() {
       if (!parsed || typeof parsed !== 'object') continue;
 
       const modelFields = ['model', 'small_model', 'large_model'];
-      for (const field of modelFields) {
-        const val = parsed[field];
-        if (typeof val !== 'string' || !val) continue;
-        if (val.startsWith('opencode-go/')) hasOpencodeGo = true;
-        if (val.startsWith('zai-coding-plan/')) hasZai = true;
+      const configs = [parsed];
+      if (parsed.agent && typeof parsed.agent === 'object') {
+        for (const agentConfig of Object.values(parsed.agent)) {
+          if (agentConfig && typeof agentConfig === 'object') configs.push(agentConfig);
+        }
+      }
+
+      for (const cfg of configs) {
+        for (const field of modelFields) {
+          const val = cfg[field];
+          if (typeof val !== 'string' || !val) continue;
+          if (val.startsWith('opencode-go/')) hasOpencodeGo = true;
+          if (val.startsWith('zai-coding-plan/')) hasZai = true;
+        }
       }
     } catch { continue; }
   }

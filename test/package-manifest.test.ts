@@ -36,6 +36,13 @@ describe("opencode package manifest", () => {
     expect(tsconfig.compilerOptions.removeComments).toBe(true);
   });
 
+  test("keeps the runtime version constant aligned with package.json", () => {
+    const pkg = readJson<{ version: string }>("package.json");
+    const versionSource = fs.readFileSync(path.join(repoRoot, "src", "version.ts"), "utf-8");
+
+    expect(versionSource).toContain(`export const VERSION = '${pkg.version}'`);
+  });
+
   test("ships a direct build command file for opencode slash-command discovery", () => {
     const commandPath = path.join(repoRoot, "assets", "commands", "build.md");
     const command = fs.readFileSync(commandPath, "utf-8");

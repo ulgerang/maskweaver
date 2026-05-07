@@ -238,13 +238,44 @@ function readOpencodeConfig(basePath: string): Record<string, any> | null {
     return null;
 }
 
+function collectModelValues(opencodeConfig: Record<string, any>): string[] {
+    const values: string[] = [];
+    const modelFields = ['model', 'small_model', 'large_model'];
+    const configs = [opencodeConfig];
+
+    if (opencodeConfig.agent) {
+        for (const agentConfig of Object.values(opencodeConfig.agent) as any[]) {
+            if (agentConfig && typeof agentConfig === 'object') configs.push(agentConfig);
+        }
+    }
+
+    for (const cfg of configs) {
+        for (const field of modelFields) {
+            const val = cfg[field];
+            if (typeof val === 'string' && val) values.push(val);
+        }
+    }
+
+    return values;
+}
+
+function hasSubscriptionHints(opencodeConfig: Record<string, any>): boolean {
+    return collectModelValues(opencodeConfig).some(
+        (val) => val.startsWith('opencode-go/') || val.startsWith('zai-coding-plan/')
+    );
+}
+
 function runCli(command: string, args: string[]): string | null {
     try {
         const result = spawnSync(command, args, {
             encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
-            timeout: 8000,
+            timeout: 5000,
             windowsHide: true,
+            env: {
+                ...process.env,
+                OPENCODE_DISABLE_AUTOUPDATE: '1',
+            },
         });
         if (result.error || result.status !== 0) return null;
         return result.stdout || null;
@@ -295,16 +326,6 @@ function parseProvidersList(output: string): ProviderInfo[] {
     return providers;
 }
 
-function detectFromModels(output: string): DetectedSubscription[] {
-    const subs = new Set<DetectedSubscription>();
-    for (const line of output.split('\n')) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('opencode-go/')) subs.add('opencode-go');
-        if (trimmed.startsWith('zai-coding-plan/')) subs.add('zai-coding-plan');
-    }
-    return Array.from(subs);
-}
-
 export function detectSubscriptionsFromCli(): SubscriptionDetectionResult {
     const evidence: string[] = [];
     const allProviders: ProviderInfo[] = [];
@@ -323,20 +344,9 @@ export function detectSubscriptionsFromCli(): SubscriptionDetectionResult {
         }
     }
 
-    const modelsOutput = runCli('opencode', ['models']);
-    if (modelsOutput) {
-        const modelSubs = detectFromModels(modelsOutput);
-        for (const sub of modelSubs) {
-            if (!subs.has(sub)) {
-                subs.add(sub);
-                evidence.push(`models: ${sub}/* models available`);
-            }
-        }
-    }
-
     if (subs.size === 0) {
         subs.add('opencode-go');
-        evidence.push('No subscription detected via CLI, defaulting to opencode-go');
+        evidence.push('No subscription detected via provider list, defaulting to opencode-go');
     }
 
     const primary = subs.has('zai-coding-plan') ? 'zai-coding-plan' : 'opencode-go';
@@ -556,16 +566,6 @@ export function formatProviderChecklist(detection: SubscriptionDetectionResult):
 }
 
 export function writeAutoDetectedConfig(projectDir: string, force?: boolean): { path: string; detection: SubscriptionDetectionResult } | null {
-    let detection: SubscriptionDetectionResult;
-
-    try {
-        detection = detectSubscriptionsFromCli();
-    } catch {
-        const opencodeConfig = readOpencodeConfig(projectDir);
-        if (!opencodeConfig) return null;
-        detection = detectSubscriptionsFromConfig(opencodeConfig);
-    }
-
     const targetPath = path.join(projectDir, 'maskweaver.config.json');
     const existingConfig = fs.existsSync(targetPath)
         ? (() => { try { return JSON.parse(fs.readFileSync(targetPath, 'utf-8')); } catch { return null; } })()
@@ -573,6 +573,26 @@ export function writeAutoDetectedConfig(projectDir: string, force?: boolean): { 
 
     if (!force && existingConfig?.dummyHumans?.pool?.length > 0) {
         return null;
+    }
+
+    let detection: SubscriptionDetectionResult;
+    const opencodeConfig = readOpencodeConfig(projectDir);
+
+    if (opencodeConfig && hasSubscriptionHints(opencodeConfig)) {
+        detection = detectSubscriptionsFromConfig(opencodeConfig);
+    } else {
+        try {
+            detection = detectSubscriptionsFromCli();
+        } catch {
+            detection = opencodeConfig
+                ? detectSubscriptionsFromConfig(opencodeConfig)
+                : {
+                    subscriptions: ['opencode-go'],
+                    primary: 'opencode-go',
+                    evidence: ['No opencode config found, defaulting to opencode-go'],
+                    allProviders: [],
+                };
+        }
     }
 
     const newConfig = buildConfigFromDetection(detection);

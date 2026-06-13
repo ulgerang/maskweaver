@@ -79,4 +79,13 @@ describe("opencode package manifest", () => {
       expect(command, `${file} contains mojibake`).not.toMatch(mojibakePattern);
     }
   });
+
+  test("postinstall does not invoke opencode recursively", () => {
+    const postinstall = fs.readFileSync(path.join(repoRoot, "postinstall.mjs"), "utf-8");
+
+    expect(postinstall).not.toContain('spawnSync("opencode"');
+    expect(postinstall).not.toContain("spawnSync('opencode'");
+    expect(postinstall).not.toContain("opencode providers");
+    expect(postinstall).not.toContain("opencode models");
+  });
 });

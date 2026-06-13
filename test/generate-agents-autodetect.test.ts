@@ -99,4 +99,29 @@ describe("writeAutoDetectedConfig", () => {
       fs.rmSync(projectDir, { recursive: true, force: true });
     }
   });
+
+  test("defaults without probing opencode CLI during plugin startup", () => {
+    const projectDir = makeTempDir("maskweaver-no-opencode-config-");
+
+    try {
+      withFakeOpencode((sentinelPath) => {
+        const result = writeAutoDetectedConfig(projectDir);
+
+        expect(result?.detection.primary).toBe("opencode-go");
+        expect(result?.detection.evidence).toContain(
+          "No opencode config found, defaulting to opencode-go"
+        );
+        expect(fs.existsSync(sentinelPath)).toBe(false);
+
+        const generated = JSON.parse(
+          fs.readFileSync(path.join(projectDir, "maskweaver.config.json"), "utf-8")
+        );
+        expect(generated.dummyHumans.pool.some((entry: { model: string }) =>
+          entry.model.startsWith("opencode-go/")
+        )).toBe(true);
+      });
+    } finally {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
 });
